@@ -3,8 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdint.h>
 #include <stdbool.h>
-#include <stddef.h>
 #include <assert.h>
 
 #define LOG
@@ -22,7 +22,7 @@
 #define IS_ESCAPE(c) ((c=='\\') || (c=='\"') || (c=='\/') || (c=='\b') || \
                       (c=='\f') || (c=='\n') || (c=='\r') || (c=='\t') || (c == '\u'))
 
-static char type_str[][20] = {
+static char token_type_str[][20] = {
   "EOF          ",
   "BRACKET_OPEN ",
   "BRACKET_CLOSE",
@@ -38,81 +38,81 @@ static char type_str[][20] = {
   "INVALID      ",
 };
 
-enum ej_token_type {
-  EJ_EOF = 0,
-  EJ_BRACKET_OPEN,
-  EJ_BRACKET_CLOSE,
-  EJ_BRACE_OPEN,
-  EJ_BRACE_CLOSE,
-  EJ_STRING,
-  EJ_NUMBER,
-  EJ_BOOLEAN,
-  EJ_NULL,
-  EJ_COLON,
-  EJ_COMMA,
-  EJ_ESC,
-  EJ_INVALID,
+enum jes_token_type {
+  JES_EOF = 0,
+  JES_BRACKET_OPEN,
+  JES_BRACKET_CLOSE,
+  JES_BRACE_OPEN,
+  JES_BRACE_CLOSE,
+  JES_STRING,
+  JES_NUMBER,
+  JES_BOOLEAN,
+  JES_NULL,
+  JES_COLON,
+  JES_COMMA,
+  JES_ESC,
+  JES_INVALID,
 };
 
-enum ej_node_type {
-  EJ_NONE = 0,
-  EJ_OBJECT,
-  EJ_KEY,
-  EJ_VALUE
+enum jes_node_type {
+  JES_NONE = 0,
+  JES_OBJECT,
+  JES_KEY,
+  JES_VALUE
 };
-struct ej_value {
-  unsigned int start;
-  unsigned int length;
-  struct ej_value *next;
-};
-
-struct ej_key {
-  unsigned int start;
-  unsigned int length;
-  struct ej_value *value;
+struct jes_value {
+  uint32_t offset;
+  uint32_t length;
+  struct jes_value *next;
 };
 
-struct ej_object {
+struct jes_key {
+  uint32_t offset;
+  uint32_t length;
+  struct jes_value *value;
+};
+
+struct jes_object {
   struct key *keys;
 };
 
-enum ej_value_type {
-  EJ_UNKOWN = 0,
-  EJ_STRING_,
-  EJ_NUMBER_,
+enum jes_value_type {
+  JES_UNKOWN = 0,
+  JES_STRING_,
+  JES_NUMBER_,
 };
 
-struct ej_token {
-  enum ej_token_type type;
-  int offset;
-  int size;
+struct jes_token {
+  enum jes_token_type type;
+  uint32_t offset;
+  uint32_t size;
 };
 
-struct ej_parser_context {
-  char *json_data;
-  int  size;
-  int  offset;
-  struct ej_token token;
+struct jes_parser_context {
+  uint8_t   *json_data;
+  uint32_t  size;
+  int32_t   offset;
+  struct jes_token token;
   void *mem_pool;
-  size_t mem_calc;
-  size_t element_count;
-  struct ej_object *head;
+  uint32_t mem_calc;
+  uint32_t element_count;
+  struct jes_object *head;
   void *node;
 };
 
 /* Function Prototypes */
-static bool ej_parse_object(struct ej_parser_context *);
-static bool ej_parse_value(struct ej_parser_context *);
-static bool ej_parse_array(struct ej_parser_context *);
+static bool jes_parse_object(struct jes_parser_context *);
+static bool jes_parse_value(struct jes_parser_context *);
+static bool jes_parse_array(struct jes_parser_context *);
 
-static void ej_log(struct ej_parser_context *ctx, const struct ej_token *token)
+static void jes_log(struct jes_parser_context *ctx, const struct jes_token *token)
 {
   printf("\n    eJSON::Token: [Pos: %5d, Len: %3d] %s \"%.*s\"",
-          token->offset, token->size, type_str[token->type],
+          token->offset, token->size, token_type_str[token->type],
           token->size, &ctx->json_data[token->offset]);
 }
 
-void ej_init_context(struct ej_parser_context *ctx, unsigned char *buffer)
+void jes_init_context(struct jes_parser_context *ctx, unsigned char *buffer)
 {
   ctx->json_data = NULL;
   ctx->size = 0;
@@ -124,9 +124,9 @@ void ej_init_context(struct ej_parser_context *ctx, unsigned char *buffer)
   ctx->head = NULL;
 }
 
-static struct ej_token get_token(struct ej_parser_context *ctx)
+static struct jes_token get_token(struct jes_parser_context *ctx)
 {
-  struct ej_token token = { 0 };
+  struct jes_token token = { 0 };
 
   while (true) {
 
@@ -134,7 +134,7 @@ static struct ej_token get_token(struct ej_parser_context *ctx)
       /* End of buffer.
          If there is a token in process, mark it as invalid. */
       if (token.type) {
-        token.type = EJ_INVALID;
+        token.type = JES_INVALID;
       }
       break;
     }
@@ -150,47 +150,47 @@ static struct ej_token get_token(struct ej_parser_context *ctx)
       }
 
       if (ch == '{') {
-        UPDATE_TOKEN(token, EJ_BRACKET_OPEN, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_BRACKET_OPEN, ctx->offset, 1);
         break;
       }
 
       if (ch == '}') {
-        UPDATE_TOKEN(token, EJ_BRACKET_CLOSE, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_BRACKET_CLOSE, ctx->offset, 1);
         break;
       }
 
       if (ch == '[') {
-        UPDATE_TOKEN(token, EJ_BRACE_OPEN, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_BRACE_OPEN, ctx->offset, 1);
         break;
       }
 
       if (ch == ']') {
-        UPDATE_TOKEN(token, EJ_BRACE_CLOSE, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_BRACE_CLOSE, ctx->offset, 1);
         break;
       }
 
       if (ch == ':') {
-        UPDATE_TOKEN(token, EJ_COLON, ctx->offset, 1)
+        UPDATE_TOKEN(token, JES_COLON, ctx->offset, 1)
         break;
       }
 
       if (ch == ',') {
-        UPDATE_TOKEN(token, EJ_COMMA, ctx->offset, 1)
+        UPDATE_TOKEN(token, JES_COMMA, ctx->offset, 1)
         break;
       }
 
       if (ch == '\"') {
         /* Use the next offset since '\"' won't be a part of token. */
-        UPDATE_TOKEN(token, EJ_STRING, ctx->offset + 1, 0);
+        UPDATE_TOKEN(token, JES_STRING, ctx->offset + 1, 0);
         if (IS_EOF_AHEAD(ctx)) {
-          UPDATE_TOKEN(token, EJ_INVALID, ctx->offset, 1);
+          UPDATE_TOKEN(token, JES_INVALID, ctx->offset, 1);
           break;
         }
         continue;
       }
 
       if (IS_DIGIT(ch)) {
-        UPDATE_TOKEN(token, EJ_NUMBER, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_NUMBER, ctx->offset, 1);
         /* NUMBERs do not have dedicated enclosing symbols like STRINGs.
            To prevent the tokenizer to consume too much characters, we need to
            look ahead and stop the process if the next character is one of
@@ -206,24 +206,24 @@ static struct ej_token get_token(struct ej_parser_context *ctx)
 
       if (ch == '-') {
         if (!IS_EOF_AHEAD(ctx) && IS_DIGIT(LOOK_AHEAD(ctx))) {
-          UPDATE_TOKEN(token, EJ_NUMBER, ctx->offset, 1);
+          UPDATE_TOKEN(token, JES_NUMBER, ctx->offset, 1);
           continue;
         }
-        UPDATE_TOKEN(token, EJ_INVALID, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_INVALID, ctx->offset, 1);
         break;
       }
 
       if ((ch == 't') || (ch == 'f')) {
         if ((LOOK_AHEAD(ctx) < 'a') || (LOOK_AHEAD(ctx) > 'z')) {
-          UPDATE_TOKEN(token, EJ_INVALID, ctx->offset, 1);
+          UPDATE_TOKEN(token, JES_INVALID, ctx->offset, 1);
           break;
         }
-        UPDATE_TOKEN(token, EJ_BOOLEAN, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_BOOLEAN, ctx->offset, 1);
         continue;
       }
 
       if (ch == 'n') {
-        UPDATE_TOKEN(token, EJ_NULL, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_NULL, ctx->offset, 1);
         continue;
       }
 
@@ -232,10 +232,10 @@ static struct ej_token get_token(struct ej_parser_context *ctx)
         continue;
       }
 
-      UPDATE_TOKEN(token, EJ_INVALID, ctx->offset, 1);
+      UPDATE_TOKEN(token, JES_INVALID, ctx->offset, 1);
       break;
     }
-    else if (token.type == EJ_STRING) {
+    else if (token.type == JES_STRING) {
 
       /* We'll not deliver '\"' symbol as a part of token. */
       if (ch == '\"') {
@@ -244,7 +244,7 @@ static struct ej_token get_token(struct ej_parser_context *ctx)
 
       if (ch == '\\') {
         if (LOOK_AHEAD(ctx) != 'n') {
-          token.type = EJ_INVALID;
+          token.type = JES_INVALID;
           break;
         }
       }
@@ -252,7 +252,7 @@ static struct ej_token get_token(struct ej_parser_context *ctx)
       token.size++;
       continue;
     }
-    else if (token.type == EJ_NUMBER) {
+    else if (token.type == JES_NUMBER) {
 
       if (IS_DIGIT(ch)) {
         token.size++;
@@ -265,7 +265,7 @@ static struct ej_token get_token(struct ej_parser_context *ctx)
       if (ch == '.') {
         token.size++;
         if (!IS_DIGIT(LOOK_AHEAD(ctx))) {
-          token.type = EJ_INVALID;
+          token.type = JES_INVALID;
           break;
         }
         continue;
@@ -275,10 +275,10 @@ static struct ej_token get_token(struct ej_parser_context *ctx)
         break;
       }
 
-      token.type = EJ_INVALID;
+      token.type = JES_INVALID;
       break;
 
-    } else if (token.type == EJ_BOOLEAN) {
+    } else if (token.type == JES_BOOLEAN) {
       token.size++;
       /* Look ahead to find symbols signaling the end of token. */
       if ((LOOK_AHEAD(ctx) == ',') ||
@@ -286,9 +286,9 @@ static struct ej_token get_token(struct ej_parser_context *ctx)
           (LOOK_AHEAD(ctx) == '}') ||
           (IS_SPACE(LOOK_AHEAD(ctx)))) {
         /* Check against "true". Use the longer string as reference. */
-        int compare_size = token.size > sizeof("true") - 1
-                         ? token.size
-                         : sizeof("true") - 1;
+        uint32_t compare_size = token.size > sizeof("true") - 1
+                              ? token.size
+                              : sizeof("true") - 1;
         if (memcmp("true", &ctx->json_data[token.offset], compare_size) == 0) {
           break;
         }
@@ -300,11 +300,11 @@ static struct ej_token get_token(struct ej_parser_context *ctx)
           break;
         }
         /* The token is neither true nor false. */
-        token.type = EJ_INVALID;
+        token.type = JES_INVALID;
         break;
       }
       continue;
-    } else if (token.type == EJ_NULL) {
+    } else if (token.type == JES_NULL) {
       token.size++;
       /* Look ahead to find symbols signaling the end of token. */
       if ((LOOK_AHEAD(ctx) == ',') ||
@@ -312,53 +312,53 @@ static struct ej_token get_token(struct ej_parser_context *ctx)
           (LOOK_AHEAD(ctx) == '}') ||
           (IS_SPACE(LOOK_AHEAD(ctx)))) {
         /* Check against "null". Use the longer string as reference. */
-        int compare_size = token.size > sizeof("null") - 1
-                         ? token.size
-                         : sizeof("null") - 1;
+        uint32_t compare_size = token.size > sizeof("null") - 1
+                              ? token.size
+                              : sizeof("null") - 1;
         if (memcmp("null", &ctx->json_data[token.offset], compare_size) == 0) {
           break;
         }
-        token.type = EJ_INVALID;
+        token.type = JES_INVALID;
         break;
       }
       continue;
     }
 
-    token.type = EJ_INVALID;
+    token.type = JES_INVALID;
     break;
   }
   return token;
 }
 
-static bool ej_accept(struct ej_parser_context *ctx, enum ej_token_type token_type, enum ej_node_type node_type)
+static bool jes_accept(struct jes_parser_context *ctx, enum jes_token_type token_type, enum jes_node_type node_type)
 {
   if (ctx->token.type == token_type) {
 #ifdef LOG
-    ej_log(ctx, &ctx->token);
+    jes_log(ctx, &ctx->token);
 #endif
     switch (node_type) {
-      case EJ_OBJECT:
-        ctx->mem_calc += sizeof(struct ej_object);
+      case JES_OBJECT:
+        ctx->mem_calc += sizeof(struct jes_object);
         ctx->element_count++;
 #ifdef LOG
         printf("\n        Node of type OBJECT is created:");
 #endif
         break;
-      case EJ_KEY:
-        ctx->mem_calc += sizeof(struct ej_key);
+      case JES_KEY:
+        ctx->mem_calc += sizeof(struct jes_key);
         ctx->element_count++;
 #ifdef LOG
         printf("\n        Node of type KEY is created:");
 #endif
         break;
-      case EJ_VALUE:
-        ctx->mem_calc += sizeof(struct ej_value);
+      case JES_VALUE:
+        ctx->mem_calc += sizeof(struct jes_value);
         ctx->element_count++;
 #ifdef LOG
         printf("\n        Node of type VALUE is created:");
 #endif
         break;
-      case EJ_NONE:
+      case JES_NONE:
         break;
       default:
 
@@ -370,66 +370,66 @@ static bool ej_accept(struct ej_parser_context *ctx, enum ej_token_type token_ty
   return false;
 }
 
-static bool ej_expect(struct ej_parser_context *ctx, enum ej_token_type token_type, enum ej_node_type node_type)
+static bool jes_expect(struct jes_parser_context *ctx, enum jes_token_type token_type, enum jes_node_type node_type)
 {
-  if (ej_accept(ctx, token_type, node_type)) {
+  if (jes_accept(ctx, token_type, node_type)) {
     return true;
   }
   printf("\neJSON> Parser error! Unexpected Token. expected: %s, got: %s \"%.*s\"",
-      type_str[token_type], type_str[ctx->token.type], ctx->token.size,
+      token_type_str[token_type], token_type_str[ctx->token.type], ctx->token.size,
       &ctx->json_data[ctx->token.offset]);
   return false;
 }
 
-static bool ej_parse_array(struct ej_parser_context *ctx)
+static bool jes_parse_array(struct jes_parser_context *ctx)
 {
-  if (!ej_accept(ctx, EJ_BRACE_OPEN, EJ_NONE)) {
+  if (!jes_accept(ctx, JES_BRACE_OPEN, JES_NONE)) {
     return false;
   }
   do {
-    if (ej_parse_value(ctx)) {
+    if (jes_parse_value(ctx)) {
     }
-  } while (ej_accept(ctx, EJ_COMMA, EJ_NONE));
+  } while (jes_accept(ctx, JES_COMMA, JES_NONE));
 
-  if (!ej_expect(ctx, EJ_BRACE_CLOSE, EJ_NONE)) {
+  if (!jes_expect(ctx, JES_BRACE_CLOSE, JES_NONE)) {
     return false;
   }
   return true;
 }
 
-static bool ej_parse_value(struct ej_parser_context *ctx)
+static bool jes_parse_value(struct jes_parser_context *ctx)
 {
-  if (ej_accept(ctx, EJ_STRING, EJ_VALUE)) {
+  if (jes_accept(ctx, JES_STRING, JES_VALUE)) {
     return true;
   }
-  else if (ej_accept(ctx, EJ_NUMBER, EJ_VALUE)) {
+  else if (jes_accept(ctx, JES_NUMBER, JES_VALUE)) {
     return true;
   }
-  else if (ej_accept(ctx, EJ_BOOLEAN, EJ_VALUE)) {
+  else if (jes_accept(ctx, JES_BOOLEAN, JES_VALUE)) {
     return true;
   }
-  else if (ej_accept(ctx, EJ_NULL, EJ_VALUE)) {
+  else if (jes_accept(ctx, JES_NULL, JES_VALUE)) {
     return true;
   }
-  else if (ej_parse_array(ctx)) {
+  else if (jes_parse_array(ctx)) {
     return true;
   }
-  else if (ej_parse_object(ctx)) {
+  else if (jes_parse_object(ctx)) {
     return true;
   }
   return false;
 }
 
-static bool ej_parse_key_value(struct ej_parser_context *ctx)
+static bool jes_parse_key_value(struct jes_parser_context *ctx)
 {
-  if (!ej_accept(ctx, EJ_STRING, EJ_KEY)) {
+  if (!jes_accept(ctx, JES_STRING, JES_KEY)) {
     return false;
   }
-  if (!ej_expect(ctx, EJ_COLON, EJ_NONE)) {
+  if (!jes_expect(ctx, JES_COLON, JES_NONE)) {
     return false;
   }
 
-  if(!ej_parse_value(ctx)) {
+  if(!jes_parse_value(ctx)) {
     return false;
   }
 
@@ -438,75 +438,48 @@ static bool ej_parse_key_value(struct ej_parser_context *ctx)
 }
 
 
-static bool ej_parse_object(struct ej_parser_context *ctx)
+static bool jes_parse_object(struct jes_parser_context *ctx)
 {
-  if (ej_accept(ctx, EJ_BRACKET_OPEN, EJ_OBJECT)) {
+  if (jes_accept(ctx, JES_BRACKET_OPEN, JES_OBJECT)) {
     do {
-      if (!ej_parse_key_value(ctx)) {
+      if (!jes_parse_key_value(ctx)) {
         break;
       }
-    } while (ej_accept(ctx, EJ_COMMA, EJ_NONE));
+    } while (jes_accept(ctx, JES_COMMA, JES_NONE));
   }
-  return ej_expect(ctx, EJ_BRACKET_CLOSE, EJ_NONE);
+  return jes_expect(ctx, JES_BRACKET_CLOSE, JES_NONE);
 }
 
-int ej_parse(struct ej_parser_context *ctx, char *json_data, int size)
+int jes_parse(struct jes_parser_context *ctx, char *json_data, uint32_t size)
 {
-  struct ej_token token;
+  struct jes_token token;
   ctx->json_data = json_data;
   ctx->size = size;
-  //printf("\nSource JSON data: %s is %d bytes.\n", json_data, size);
-  printf("\nSize of JSON data: %d bytes", strnlen(json_data, size));
 
-#if 0
-  do {
-    token = get_token(ctx);
-#ifdef LOG
-    ej_log(ctx, &token);
-#endif
-    switch (token.type) {
-      case EJ_BRACKET_OPEN:
-        ctx->mem_calc += sizeof(struct ej_object);
-        break;
-      case EJ_STRING:
-        ctx->mem_calc += sizeof(struct ej_object);
-        break;
-      case EJ_INVALID:
-        printf("\neJSON> Syntax error! Invalid Token \"%.*s\"",
-          token.size, &ctx->json_data[token.offset]);
-          break;
-      default:
-        break;
+  ctx->token = get_token(ctx);
+  while (ctx->token.type != JES_EOF && ctx->token.type != JES_INVALID) {
+    if (!jes_parse_object(ctx)) {
+      printf("\neJSON> Parsing failed!");
+      break;
     }
-  } while(token.type != EJ_EOF && token.type != EJ_INVALID);
-#else
-    ctx->token = get_token(ctx);
-    while (ctx->token.type != EJ_EOF && ctx->token.type != EJ_INVALID) {
-      if (!ej_parse_object(ctx)) {
-        printf("\neJSON> Parsing failed!");
-        break;
-      }
-    }
-
-
-#endif
+  }
 
   return 0;
 }
 
 int main(void)
 {
-  struct ej_parser_context ctx;
+  struct jes_parser_context ctx;
   FILE *fp;
   char file_data[0xFFFFF];
   printf("EmbeddedJSON...");
-  printf("\nSize of ej_object: %d bytes", sizeof(struct ej_object));
-  printf("\nSize of ej_value: %d bytes", sizeof(struct ej_value));
-  printf("\nSize of ej_key: %d bytes", sizeof(struct ej_key));
-  printf("\nSize of ej_token: %d bytes", sizeof(struct ej_token));
-  printf("\nSize of ej_parser_context: %d bytes", sizeof(struct ej_parser_context));
+  printf("\nSize of jes_object: %d bytes", sizeof(struct jes_object));
+  printf("\nSize of jes_value: %d bytes", sizeof(struct jes_value));
+  printf("\nSize of jes_key: %d bytes", sizeof(struct jes_key));
+  printf("\nSize of jes_token: %d bytes", sizeof(struct jes_token));
+  printf("\nSize of jes_parser_context: %d bytes", sizeof(struct jes_parser_context));
 
-  ej_init_context(&ctx, 0);
+  jes_init_context(&ctx, 0);
   fp = fopen("test1.json", "rb");
 
   if (fp != NULL) {
@@ -518,7 +491,7 @@ int main(void)
     fclose(fp);
   }
 
-  ej_parse(&ctx, file_data, sizeof(file_data));
+  jes_parse(&ctx, file_data, sizeof(file_data));
+  printf("\nSize of JSON data: %d bytes", strnlen(file_data, sizeof(file_data)));
   printf("\nMemory required: %d bytes for %d elements.", ctx.mem_calc, ctx.element_count);
-  //printf("\n is numeric: %d", isnumber('5'));
 }

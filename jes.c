@@ -26,8 +26,6 @@
 #define HAS_NEXT(node_ptr) (node_ptr->next > -1)
 #define HAS_PARENT(node_ptr) (node_ptr->parent > -1)
 
-
-
 static char jes_token_type_str[][20] = {
   "EOF          ",
   "BRACKET_OPEN ",
@@ -92,12 +90,6 @@ struct jes_node {
   struct jes_node_data data;
 };
 
-enum jes_value_type {
-  JES_UNKOWN = 0,
-  JES_STRING_,
-  JES_NUMBER_,
-};
-
 struct jes_token {
   enum jes_token_type type;
   uint32_t offset;
@@ -108,9 +100,10 @@ struct jes_allocator {
   uint32_t size;
   uint16_t capacity;
   uint16_t allocated;
+  int16_t  index;
   struct jes_node *pool;
-  //struct jes_node free;
-  int16_t index;
+  void *free;
+
 };
 
 struct jes_parser_context {
@@ -124,11 +117,6 @@ struct jes_parser_context {
   struct jes_node *root;
   struct jes_node *node;
 };
-
-/* Function Prototypes */
-static bool jes_parse_object(struct jes_parser_context *);
-static bool jes_parse_value(struct jes_parser_context *);
-static bool jes_parse_array(struct jes_parser_context *);
 
 static void jes_log(struct jes_parser_context *ctx, const struct jes_token *token)
 {
@@ -500,15 +488,16 @@ static struct jes_token jes_get_token(struct jes_parser_context *ctx)
     token.type = JES_INVALID;
     break;
   }
+
+#ifdef LOG
+    jes_log(ctx, &token);
+#endif
   return token;
 }
 
 static bool jes_accept(struct jes_parser_context *ctx, enum jes_token_type token_type, enum jes_node_type node_type)
 {
   if (ctx->token.type == token_type) {
-#ifdef LOG
-    jes_log(ctx, &ctx->token);
-#endif
     switch (node_type) {
       case JES_OBJECT:
       case JES_KEY:
@@ -566,89 +555,95 @@ static bool jes_expect(struct jes_parser_context *ctx, enum jes_token_type token
   return false;
 }
 
-static bool jes_parse_array(struct jes_parser_context *ctx)
-{
-  if (!jes_accept(ctx, JES_BRACE_OPEN, JES_ARRAY)) {
-    return false;
-  }
-  do {
-    if (jes_parse_value(ctx)) {
-    }
-  } while (jes_accept(ctx, JES_COMMA, JES_NONE));
-
-  if (!jes_expect(ctx, JES_BRACE_CLOSE, JES_NONE)) {
-    return false;
-  }
-  return true;
-}
-
-static bool jes_parse_value(struct jes_parser_context *ctx)
-{
-  if (jes_accept(ctx, JES_STRING, JES_VALUE)) {
-    return true;
-  }
-  else if (jes_accept(ctx, JES_NUMBER, JES_VALUE)) {
-    return true;
-  }
-  else if (jes_accept(ctx, JES_BOOLEAN, JES_VALUE)) {
-    return true;
-  }
-  else if (jes_accept(ctx, JES_NULL, JES_VALUE)) {
-    return true;
-  }
-  else if (jes_parse_array(ctx)) {
-    return true;
-  }
-  else if (jes_parse_object(ctx)) {
-    return true;
-  }
-  return false;
-}
-
-static bool jes_parse_key_value(struct jes_parser_context *ctx)
-{
-  if (!jes_accept(ctx, JES_STRING, JES_KEY)) {
-    return false;
-  }
-  if (!jes_expect(ctx, JES_COLON, JES_NONE)) {
-    return false;
-  }
-
-  if(!jes_parse_value(ctx)) {
-    return false;
-  }
-
-  return true;
-}
-
-static bool jes_parse_object(struct jes_parser_context *ctx)
-{
-  if (jes_accept(ctx, JES_BRACKET_OPEN, JES_OBJECT)) {
-    do {
-      if (!jes_parse_key_value(ctx)) {
-        break;
-      }
-    } while (jes_accept(ctx, JES_COMMA, JES_NONE));
-  }
-  return jes_expect(ctx, JES_BRACKET_CLOSE, JES_NONE);
-}
-
 int jes_parse(struct jes_parser_context *ctx, char *json_data, uint32_t size)
 {
-  struct jes_token token;
   ctx->json_data = json_data;
   ctx->size = size;
+  int result = 0;
 
   ctx->token = jes_get_token(ctx);
-  while (ctx->token.type != JES_EOF && ctx->token.type != JES_INVALID) {
-    if (!jes_parse_object(ctx)) {
-      printf("\neJES Parsing failed!");
-      break;
-    }
-    if (!ctx->node) break;
+  if (!jes_expect(ctx, JES_BRACKET_OPEN, JES_OBJECT)) {
+    return -1;
   }
-  printf("\nParsing is finished!");
-  return 0;
+
+  while (ctx->node) {
+
+    switch (ctx->node->data.type) {
+
+      case JES_OBJECT:
+        if (jes_accept(ctx, JES_BRACKET_CLOSE, JES_NONE)) {
+          continue;
+        }
+        if (jes_expect(ctx, JES_STRING, JES_KEY)) {
+          continue;
+        }
+
+        result = -1;
+        break;
+
+      case JES_KEY:
+        if (!jes_expect(ctx, JES_COLON, JES_NONE)) {
+            break;
+        }
+        if (jes_accept(ctx, JES_STRING, JES_VALUE)  ||
+            jes_accept(ctx, JES_NUMBER, JES_VALUE)  ||
+            jes_accept(ctx, JES_BOOLEAN, JES_VALUE) ||
+            jes_accept(ctx, JES_NULL, JES_VALUE)) {
+          continue;
+        }
+        if (jes_accept(ctx, JES_BRACE_OPEN, JES_ARRAY)) {
+          continue;
+        }
+
+        if (jes_expect(ctx, JES_BRACKET_OPEN, JES_OBJECT)) {
+          continue;
+        }
+        result = -1;
+        break;
+
+      case JES_VALUE:
+          if (jes_accept(ctx, JES_BRACE_CLOSE, JES_NONE) ||
+              jes_accept(ctx, JES_BRACKET_CLOSE, JES_NONE)) {
+            jes_accept(ctx, JES_COMMA, JES_NONE);
+            continue;
+          }
+
+          if (jes_expect(ctx, JES_COMMA, JES_NONE)) {
+            continue;
+          }
+        result = -1;
+        break;
+      case JES_ARRAY:
+        if (jes_accept(ctx, JES_BRACE_OPEN, JES_ARRAY)) {
+          continue;
+        }
+
+        if (jes_accept(ctx, JES_BRACKET_OPEN, JES_OBJECT)) {
+          continue;
+        }
+
+        if (jes_accept(ctx, JES_STRING, JES_VALUE)  ||
+            jes_accept(ctx, JES_NUMBER, JES_VALUE)  ||
+            jes_accept(ctx, JES_BOOLEAN, JES_VALUE) ||
+            jes_accept(ctx, JES_NULL, JES_VALUE)) {
+          continue;
+        }
+
+        if (jes_expect(ctx, JES_BRACE_CLOSE, JES_NONE)) {
+          jes_accept(ctx, JES_COMMA, JES_NONE);
+          continue;
+        }
+        result = -1;
+        break;
+
+      default:
+        break;
+    }
+
+    break;
+  }
+
+  return result;
 }
 
 void print_nodes(struct jes_parser_context *ctx)
@@ -700,7 +695,6 @@ void print_nodes(struct jes_parser_context *ctx)
       }
     }
   }
-
 }
 
 int main(void)
@@ -728,10 +722,11 @@ int main(void)
     fclose(fp);
   }
 
-  jes_parse(&ctx, file_data, sizeof(file_data));
-  printf("\nSize of JSON data: %d bytes", strnlen(file_data, sizeof(file_data)));
-  printf("\nMemory required: %d bytes for %d elements.", ctx.mem_calc, ctx.element_count);
-  printf("\nMemory consumed: %d elements.", ctx.allocator.allocated);
-  print_nodes(&ctx);
+  if (0 == jes_parse(&ctx, file_data, sizeof(file_data))) {
+    printf("\nSize of JSON data: %d bytes", strnlen(file_data, sizeof(file_data)));
+    printf("\nMemory required: %d bytes for %d elements.", ctx.mem_calc, ctx.element_count);
+    printf("\nMemory consumed: %d elements.", ctx.allocator.allocated);
+    print_nodes(&ctx);
+  }
   return 0;
 }

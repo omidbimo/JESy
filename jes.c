@@ -22,6 +22,12 @@
 #define IS_ESCAPE(c) ((c=='\\') || (c=='\"') || (c=='\/') || (c=='\b') || \
                       (c=='\f') || (c=='\n') || (c=='\r') || (c=='\t') || (c == '\u'))
 
+#define HAS_CHILD(node_ptr) (node_ptr->child > -1)
+#define HAS_NEXT(node_ptr) (node_ptr->next > -1)
+#define HAS_PARENT(node_ptr) (node_ptr->parent > -1)
+
+
+
 static char jes_token_type_str[][20] = {
   "EOF          ",
   "BRACKET_OPEN ",
@@ -72,13 +78,18 @@ enum jes_node_type {
 
 typedef int16_t jes_node_descriptor;
 
-struct jes_node {
+struct jes_node_data {
   uint16_t type; /* of type enum jes_node_type */
   uint16_t size;
   uint32_t offset;
+};
+
+struct jes_node {
+  jes_node_descriptor self;
   jes_node_descriptor parent;
   jes_node_descriptor child;
   jes_node_descriptor next;
+  struct jes_node_data data;
 };
 
 enum jes_value_type {
@@ -110,10 +121,9 @@ struct jes_parser_context {
   struct jes_allocator allocator;
   uint32_t mem_calc;
   uint32_t element_count;
-  jes_node_descriptor root;
-  jes_node_descriptor node;
+  struct jes_node *root;
+  struct jes_node *node;
 };
-
 
 /* Function Prototypes */
 static bool jes_parse_object(struct jes_parser_context *);
@@ -127,31 +137,21 @@ static void jes_log(struct jes_parser_context *ctx, const struct jes_token *toke
           token->size, &ctx->json_data[token->offset]);
 }
 
-
-static jes_node_descriptor jes_allocate_node(struct jes_allocator *alloc)
+static struct jes_node* jes_allocate_node(struct jes_allocator *alloc)
 {
-  jes_node_descriptor h_new_node = -1;
+  struct jes_node *new_node = NULL;
 
   if (alloc->index < alloc->capacity) {
-    struct jes_node *node = NULL;
-    h_new_node = alloc->index++;
-    node = &alloc->pool[h_new_node];
-    memset(node, 0, sizeof(*node));
-    node->parent = -1;
-    node->child = -1;
-    node->next = -1;
+    new_node = &alloc->pool[alloc->index];
+    memset(new_node, 0, sizeof(*new_node));
+    new_node->self = alloc->index;
+    new_node->parent = -1;
+    new_node->child = -1;
+    new_node->next = -1;
     alloc->allocated++;
+    alloc->index++;
   }
-  return h_new_node;
-}
-
-struct jes_node jes_get_node(struct jes_parser_context *ctx, jes_node_descriptor h_node)
-{
-  struct jes_node node = { 0 };
-  if ((h_node >= 0) && (h_node <= ctx->allocator.capacity)) {
-    return ctx->allocator.pool[h_node];
-  }
-  return node;
+  return new_node;
 }
 
 static void jes_init_allocator(struct jes_allocator *alloc,
@@ -167,141 +167,120 @@ static void jes_init_allocator(struct jes_allocator *alloc,
   alloc->index = 0;
 }
 
-jes_node_descriptor jes_get_parent(struct jes_parser_context *ctx, jes_node_descriptor h_node)
+static struct jes_node* jes_get_node_parent(struct jes_allocator *alloc, struct jes_node *node)
 {
-  if ((h_node < 0) || (h_node >= ctx->allocator.capacity)) {
-    return -1;
+  /* TODO: add checkings */
+  if (node && (HAS_PARENT(node))) {
+    return &alloc->pool[node->parent];
   }
-  return ctx->allocator.pool[h_node].parent;
+
+  return NULL;
 }
 
-jes_node_descriptor jes_get_child(struct jes_parser_context *ctx, jes_node_descriptor h_node)
+static struct jes_node* jes_get_node_child(struct jes_allocator *alloc, struct jes_node *node)
 {
-  if ((h_node < 0) || (h_node >= ctx->allocator.capacity)) {
-    return -1;
+  /* TODO: add checkings */
+  if (node && HAS_CHILD(node)) {
+    return &alloc->pool[node->child];
   }
-  return ctx->allocator.pool[h_node].child;
+
+  return NULL;
 }
 
-jes_node_descriptor jes_get_next(struct jes_parser_context *ctx, jes_node_descriptor h_node)
+static struct jes_node* jes_get_node_next(struct jes_allocator *alloc, struct jes_node *node)
 {
-  if ((h_node < 0) || (h_node >= ctx->allocator.capacity)) {
-    return -1;
+  /* TODO: add checkings */
+  if (node && HAS_NEXT(node)) {
+    return &alloc->pool[node->next];
   }
-  return ctx->allocator.pool[h_node].next;
+
+  return NULL;
 }
 
-jes_node_descriptor jes_get_parent_object(struct jes_parser_context *ctx, jes_node_descriptor h_node)
+static struct jes_node* jes_get_node_object_parent(struct jes_allocator *alloc, struct jes_node *node)
 {
-
-  if ((h_node < 0) || (h_node >= ctx->allocator.capacity)) {
-    return -1;
-  }
-  do {
-    h_node = ctx->allocator.pool[h_node].parent;
-    if (h_node == -1) {
+  struct jes_node *parent = NULL;
+  /* TODO: add checkings */
+  while (node && HAS_PARENT(node)) {
+    node = &alloc->pool[node->parent];
+    if (node->data.type == JES_OBJECT) {
+      parent = node;
       break;
     }
-  } while (ctx->allocator.pool[h_node].type != JES_OBJECT);
-  return h_node;
+  }
+
+  return parent;
 }
 
-jes_node_descriptor jes_get_parent_key(struct jes_parser_context *ctx, jes_node_descriptor h_node)
+static struct jes_node* jes_get_node_key_parent(struct jes_allocator *alloc, struct jes_node *node)
 {
-  if ((h_node < 0) || (h_node >= ctx->allocator.capacity)) {
-    return -1;
-  }
-  do {
-    h_node = ctx->allocator.pool[h_node].parent;
-    if (h_node == -1) {
+  struct jes_node *parent = NULL;
+  /* TODO: add checkings */
+  while (HAS_PARENT(node)) {
+    node = &alloc->pool[node->parent];
+    if (node->data.type == JES_KEY) {
+      parent = node;
       break;
     }
-  } while (ctx->allocator.pool[h_node].type != JES_KEY);
-  return h_node;
+  }
+
+  return parent;
 }
 
-jes_node_descriptor jes_get_parent_array(struct jes_parser_context *ctx, jes_node_descriptor h_node)
+static struct jes_node* jes_get_node_array_parent(struct jes_allocator *alloc, struct jes_node *node)
 {
-  if ((h_node < 0) || (h_node >= ctx->allocator.capacity)) {
-    return -1;
-  }
-  do {
-    h_node = ctx->allocator.pool[h_node].parent;
-    if (h_node == -1) {
+  struct jes_node *parent = NULL;
+  /* TODO: add checkings */
+  while (HAS_PARENT(node)) {
+    node = &alloc->pool[node->parent];
+    if (node->data.type == JES_ARRAY) {
+      parent = node;
       break;
     }
-  } while (ctx->allocator.pool[h_node].type != JES_ARRAY);
-  return h_node;
+  }
+
+  return parent;
 }
 
-enum jes_node_type jes_get_parent_type(struct jes_parser_context *ctx, jes_node_descriptor h_node)
+static enum jes_node_type jes_get_parent_type(struct jes_allocator *alloc, struct jes_node *node)
 {
-  if ((h_node < 0) || (h_node >= ctx->allocator.capacity)) {
-    return JES_NONE;
+  if (node) {
+    return alloc->pool[node->parent].data.type;
   }
-  return ctx->allocator.pool[ctx->allocator.pool[h_node].parent].type;
+  return JES_NONE;
 }
 
-enum jes_node_type jes_get_node_type(struct jes_parser_context *ctx, jes_node_descriptor h_node)
+static struct jes_node* jes_append_node(struct jes_parser_context *ctx,
+     struct jes_node *node, uint16_t type, uint32_t offset, uint16_t size)
 {
-  if ((h_node < 0) || (h_node >= ctx->allocator.capacity)) {
-    return JES_NONE;
-  }
-  return ctx->allocator.pool[h_node].type;
-}
+  struct jes_node *new_node = jes_allocate_node(&ctx->allocator);
 
-bool jes_has_child(struct jes_parser_context *ctx, jes_node_descriptor h_node) {
-  if ((h_node < 0) || (h_node >= ctx->allocator.capacity)) {
-    return false;
-  }
-  //printf("\n Has %d Child? %s", h_node, ctx->allocator.pool[h_node].child != -1 ? "True": "False");
-  return ctx->allocator.pool[h_node].child != -1;
-}
+  if (new_node >= 0) {
+    new_node->data.type = type;
+    new_node->data.size = size;
+    new_node->data.offset = offset;
+    if (node) {
+      new_node->parent = node->self;
 
-bool jes_has_next(struct jes_parser_context *ctx, jes_node_descriptor h_node) {
-  if ((h_node < 0) || (h_node >= ctx->allocator.capacity)) {
-    return false;
-  }
-  //printf("\n Has %d Next? %s", h_node, ctx->allocator.pool[h_node].next != -1 ? "True": "False");
-  return ctx->allocator.pool[h_node].next != -1;
-}
-
-jes_node_descriptor jes_append_node(struct jes_parser_context *ctx,
-     jes_node_descriptor h_node, uint16_t type, uint32_t offset, uint16_t size)
-{
-  printf("\n            ***Append to node %d", h_node);
-  if (h_node >= ctx->allocator.capacity) {
-    return -1;
-  }
-
-  jes_node_descriptor h_new_node = jes_allocate_node(&ctx->allocator);
-  printf("\n            ----------------> new node: %d", h_new_node);
-  if (h_new_node >= 0) {
-    ctx->allocator.pool[h_new_node].type = type;
-    ctx->allocator.pool[h_new_node].size = size;
-    ctx->allocator.pool[h_new_node].offset = offset;
-    ctx->allocator.pool[h_new_node].child = -1;
-    ctx->allocator.pool[h_new_node].next = -1;
-    ctx->allocator.pool[h_new_node].parent = h_node;
-    if (h_node >= 0) {
-      if (ctx->allocator.pool[h_node].child < 0) {
-        ctx->allocator.pool[h_node].child = h_new_node;
-        printf("\n     %d child-> %d, type %s", h_new_node, h_node, jes_node_type_str[ctx->allocator.pool[h_new_node].type]);
-      } else {
-        jes_node_descriptor hn = ctx->allocator.pool[h_node].child;
-        while (ctx->allocator.pool[hn].next != -1) {
-          hn = ctx->allocator.pool[hn].next;
+      if (HAS_CHILD(node)) {
+        struct jes_node *child = &ctx->allocator.pool[node->child];
+        while (HAS_NEXT(child)) {
+          child = &ctx->allocator.pool[child->next];
         }
-        ctx->allocator.pool[hn].next = h_new_node;
-        printf("\n     %d next-> %d, type %s", h_new_node, hn, jes_node_type_str[ctx->allocator.pool[h_new_node].type]);
+        child->next = new_node->self;
       }
-    } else {
-      ctx->root = h_new_node;
+      else {
+        node->child = new_node->self;
+      }
     }
-    return h_new_node;
+    else {
+      assert(!ctx->root);
+      if (ctx->root) printf("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+      ctx->root = new_node;
+    }
   }
 
-  return -1;
+  return new_node;
 }
 
 void jes_init_context(struct jes_parser_context *ctx,
@@ -314,8 +293,8 @@ void jes_init_context(struct jes_parser_context *ctx,
   jes_init_allocator(&ctx->allocator, mem_pool, pool_size);
   ctx->mem_calc = 0;
   ctx->element_count = 0;
-  ctx->root = -1;
-  ctx->node = -1;
+  ctx->root = NULL;
+  ctx->node = NULL;
 }
 
 static struct jes_token jes_get_token(struct jes_parser_context *ctx)
@@ -538,43 +517,38 @@ static bool jes_accept(struct jes_parser_context *ctx, enum jes_token_type token
         ctx->mem_calc += sizeof(struct jes_node);
         ctx->element_count++;
         ctx->node = jes_append_node(ctx, ctx->node, node_type, ctx->token.offset, ctx->token.size);
-        if (ctx->node < 0) {
+        if (!ctx->node) {
           printf("\n JES Allocation failed");
           return false;
         }
 
 #ifdef LOG
-        printf("\n        New %s Node.", jes_node_type_str[node_type]);
+        printf("\n    JES::Node: %s", jes_node_type_str[node_type]);
 #endif
-
         break;
 
       case JES_NONE:
-        printf("\n                from node %d,", ctx->node);
         if (token_type == JES_BRACE_CLOSE) {
-          ctx->node = jes_get_parent_object(ctx, ctx->node);
-          printf(" (1)go to parent parent %d", ctx->node);
+          ctx->node = jes_get_node_object_parent(&ctx->allocator, ctx->node);
         }
         else if (token_type == JES_BRACKET_CLOSE) {
-          ctx->node = jes_get_parent_object(ctx, ctx->node);
-          ctx->node = jes_get_parent_object(ctx, ctx->node);
-          printf(" (1)go to parent parent %d", ctx->node);
+          ctx->node = jes_get_node_object_parent(&ctx->allocator, ctx->node);
         }
-        else if ((token_type == JES_COMMA) && (jes_get_node_type(ctx, ctx->node) == JES_VALUE)) {
-          if (jes_get_parent_type(ctx, ctx->node) ==  JES_ARRAY) {
-            ctx->node = jes_get_parent_array(ctx, ctx->node);
-            printf(" (1)go to parent parent %d", ctx->node);
+        else if ((token_type == JES_COMMA) && (ctx->node->data.type == JES_VALUE)) {
+          if (jes_get_parent_type(&ctx->allocator, ctx->node) ==  JES_ARRAY) {
+            ctx->node = jes_get_node_array_parent(&ctx->allocator, ctx->node);
           }
-          else if (jes_get_parent_type(ctx, ctx->node) ==  JES_KEY) {
-            ctx->node = jes_get_parent_object(ctx, ctx->node);
-            printf(" (1)go to parent parent %d", ctx->node);
+          else if (jes_get_parent_type(&ctx->allocator, ctx->node) ==  JES_KEY) {
+            ctx->node = jes_get_node_object_parent(&ctx->allocator, ctx->node);
           }
         }
+
         break;
       default:
 
         break;
     }
+
     ctx->token = jes_get_token(ctx);
     return true;
   }
@@ -671,61 +645,61 @@ int jes_parse(struct jes_parser_context *ctx, char *json_data, uint32_t size)
       printf("\neJES Parsing failed!");
       break;
     }
+    if (!ctx->node) break;
   }
-
+  printf("\nParsing is finished!");
   return 0;
 }
 
 void print_nodes(struct jes_parser_context *ctx)
 {
-  jes_node_descriptor h_node = ctx->root;
-  struct jes_node node;
+  struct jes_node *node = ctx->root;
+
   uint32_t idx;
   for (idx = 0; idx < ctx->allocator.allocated; idx++) {
-    printf("\n    %d. %s,   parent:%d, next:%d, child:%d", idx, jes_node_type_str[ctx->allocator.pool[idx].type],
+    printf("\n    %d. %s,   parent:%d, next:%d, child:%d", idx, jes_node_type_str[ctx->allocator.pool[idx].data.type],
       ctx->allocator.pool[idx].parent, ctx->allocator.pool[idx].next, ctx->allocator.pool[idx].child);
   }
 
-  while (true) {
-    //printf("\n :> reading node: %d", h_node);
-    node = jes_get_node(ctx, h_node);
+  while (node) {
 
-    if ((h_node == -1) || (node.type == JES_NONE)) {
-      printf("\nEND!");
+    if (node->data.type == JES_NONE) {
+      printf("\nEND! reached a JES_NONE");
       break;
     }
-    if (node.type == JES_OBJECT) {
-      printf("\n    { <%s>", jes_node_type_str[node.type]);
-    } else if (node.type == JES_KEY) {
-      printf("\n        %.*s <%s> :", node.size, &ctx->json_data[node.offset], jes_node_type_str[node.type]);
-    } else if (node.type == JES_ARRAY) {
+
+    if (node->self == -1) {
+      printf("\nEND! Reached a -1 self!");
+      break;
+    }
+
+    if (node->data.type == JES_OBJECT) {
+      printf("\n    { <%s>", jes_node_type_str[node->data.type]);
+    } else if (node->data.type == JES_KEY) {
+      printf("\n        %.*s <%s> :", node->data.size, &ctx->json_data[node->data.offset], jes_node_type_str[node->data.type]);
+    } else if (node->data.type == JES_ARRAY) {
       //printf("\n            %.*s <%s>", node.size, &ctx->json_data[node.offset], jes_node_type_str[node.type]);
     } else {
-      printf("\n            %.*s <%s>", node.size, &ctx->json_data[node.offset], jes_node_type_str[node.type]);
+      printf("\n            %.*s <%s>", node->data.size, &ctx->json_data[node->data.offset], jes_node_type_str[node->data.type]);
     }
 
-    if (jes_has_child(ctx, h_node)) {
-      h_node = jes_get_child(ctx, h_node);
-      //printf("   Has child-> ");
+    if (HAS_CHILD(node)) {
+      node = jes_get_node_child(&ctx->allocator, node);
       continue;
     }
 
-    if (jes_has_next(ctx, h_node)) {
-      //printf("\n  !!%d", h_node);
-      h_node = jes_get_next(ctx, h_node);
+    if (HAS_NEXT(node)) {
+      node = jes_get_node_next(&ctx->allocator, node);
       continue;
     }
 
-    while (true) {
-      h_node = jes_get_parent(ctx, h_node);
-      if (h_node == -1) break;
-      if (jes_has_next(ctx, h_node)) {
-        h_node = jes_get_next(ctx, h_node);
+    while (node = jes_get_node_parent(&ctx->allocator, node)) {
+      if (HAS_NEXT(node)) {
+        node = jes_get_node_next(&ctx->allocator, node);
         break;
       }
     }
   }
-
 
 }
 

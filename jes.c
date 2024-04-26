@@ -9,10 +9,10 @@
 
 #define LOG
 
-#define UPDATE_TOKEN(token, type_, offset_, size_) \
-  token.type = type_; \
-  token.offset = offset_; \
-  token.size = size_;
+#define UPDATE_TOKEN(tok, type_, offset_, size_) \
+  tok.type = type_; \
+  tok.offset = offset_; \
+  tok.size = size_;
 
 #define LOOK_AHEAD(ctx_) ctx_->json_data[ctx_->offset + 1]
 #define IS_EOF_AHEAD(ctx_) (((ctx_->offset + 1) >= ctx_->size) || \
@@ -28,10 +28,10 @@
 
 static char jes_token_type_str[][20] = {
   "EOF          ",
-  "BRACKET_OPEN ",
-  "BRACKET_CLOSE",
-  "BRACE_OPEN   ",
-  "BRACE_CLOSE  ",
+  "OPENING_BRACKET ",
+  "CLOSING_BRACKET",
+  "OPENING_BRACE   ",
+  "CLOSING_BRACE  ",
   "STRING       ",
   "NUMBER       ",
   "BOOLEAN      ",
@@ -51,36 +51,36 @@ static char jes_node_type_str[][20] = {
 };
 
 enum jes_token_type {
-  JES_EOF = 0,
-  JES_BRACKET_OPEN,
-  JES_BRACKET_CLOSE,
-  JES_BRACE_OPEN,
-  JES_BRACE_CLOSE,
-  JES_STRING,
-  JES_NUMBER,
-  JES_BOOLEAN,
-  JES_NULL,
-  JES_COLON,
-  JES_COMMA,
-  JES_ESC,
-  JES_INVALID,
+  JES_TOKEN_EOF = 0,
+  JES_TOKEN_OPENING_BRACKET,
+  JES_TOKEN_CLOSING_BRACKET,
+  JES_TOKEN_OPENING_BRACE,
+  JES_TOKEN_CLOSING_BRACE,
+  JES_TOEKN_STRING,
+  JES_TOKEN_NUMBER,
+  JES_TOKEN_BOOLEAN,
+  JES_TOKEN_NULL,
+  JES_TOKEN_COLON,
+  JES_TOKEN_COMMA,
+  JES_TOKEN_ESC,
+  JES_TOKEN_INVALID,
 };
 
 enum jes_node_type {
-  JES_NONE = 0,
-  JES_OBJECT,
-  JES_KEY,
-  JES_VALUE,
-  JES_ARRAY,
+  JES_NODE_NONE = 0,
+  JES_NODE_OBJECT,
+  JES_NODE_KEY,
+  JES_NODE_VALUE,
+  JES_NODE_ARRAY,
 };
-
-typedef int16_t jes_node_descriptor;
 
 struct jes_node_data {
   uint16_t type; /* of type enum jes_node_type */
   uint16_t size;
   uint32_t offset;
 };
+
+typedef int16_t jes_node_descriptor;
 
 struct jes_node {
   jes_node_descriptor self;
@@ -113,7 +113,8 @@ struct jes_parser_context {
   struct jes_token token;
   struct jes_allocator allocator;
   uint32_t mem_calc;
-  uint32_t element_count;
+  uint32_t node_count;
+  uint32_t last_error;
   struct jes_node *root;
   struct jes_node *node;
 };
@@ -191,7 +192,7 @@ static struct jes_node* jes_get_node_object_parent(struct jes_allocator *alloc, 
   /* TODO: add checkings */
   while (node && HAS_PARENT(node)) {
     node = &alloc->pool[node->parent];
-    if (node->data.type == JES_OBJECT) {
+    if (node->data.type == JES_NODE_OBJECT) {
       parent = node;
       break;
     }
@@ -206,7 +207,7 @@ static struct jes_node* jes_get_node_key_parent(struct jes_allocator *alloc, str
   /* TODO: add checkings */
   while (HAS_PARENT(node)) {
     node = &alloc->pool[node->parent];
-    if (node->data.type == JES_KEY) {
+    if (node->data.type == JES_NODE_KEY) {
       parent = node;
       break;
     }
@@ -221,7 +222,7 @@ static struct jes_node* jes_get_node_array_parent(struct jes_allocator *alloc, s
   /* TODO: add checkings */
   while (HAS_PARENT(node)) {
     node = &alloc->pool[node->parent];
-    if (node->data.type == JES_ARRAY) {
+    if (node->data.type == JES_NODE_ARRAY) {
       parent = node;
       break;
     }
@@ -235,7 +236,7 @@ static enum jes_node_type jes_get_parent_type(struct jes_allocator *alloc, struc
   if (node) {
     return alloc->pool[node->parent].data.type;
   }
-  return JES_NONE;
+  return JES_NODE_NONE;
 }
 
 static struct jes_node* jes_append_node(struct jes_parser_context *ctx,
@@ -263,7 +264,6 @@ static struct jes_node* jes_append_node(struct jes_parser_context *ctx,
     }
     else {
       assert(!ctx->root);
-      if (ctx->root) printf("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
       ctx->root = new_node;
     }
   }
@@ -280,7 +280,8 @@ void jes_init_context(struct jes_parser_context *ctx,
   ctx->offset = -1;
   jes_init_allocator(&ctx->allocator, mem_pool, pool_size);
   ctx->mem_calc = 0;
-  ctx->element_count = 0;
+  ctx->node_count = 0;
+  ctx->last_error = 0;
   ctx->root = NULL;
   ctx->node = NULL;
 }
@@ -295,7 +296,7 @@ static struct jes_token jes_get_token(struct jes_parser_context *ctx)
       /* End of buffer.
          If there is a token in process, mark it as invalid. */
       if (token.type) {
-        token.type = JES_INVALID;
+        token.type = JES_TOKEN_INVALID;
       }
       break;
     }
@@ -311,47 +312,47 @@ static struct jes_token jes_get_token(struct jes_parser_context *ctx)
       }
 
       if (ch == '{') {
-        UPDATE_TOKEN(token, JES_BRACKET_OPEN, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_TOKEN_OPENING_BRACKET, ctx->offset, 1);
         break;
       }
 
       if (ch == '}') {
-        UPDATE_TOKEN(token, JES_BRACKET_CLOSE, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_TOKEN_CLOSING_BRACKET, ctx->offset, 1);
         break;
       }
 
       if (ch == '[') {
-        UPDATE_TOKEN(token, JES_BRACE_OPEN, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_TOKEN_OPENING_BRACE, ctx->offset, 1);
         break;
       }
 
       if (ch == ']') {
-        UPDATE_TOKEN(token, JES_BRACE_CLOSE, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_TOKEN_CLOSING_BRACE, ctx->offset, 1);
         break;
       }
 
       if (ch == ':') {
-        UPDATE_TOKEN(token, JES_COLON, ctx->offset, 1)
+        UPDATE_TOKEN(token, JES_TOKEN_COLON, ctx->offset, 1)
         break;
       }
 
       if (ch == ',') {
-        UPDATE_TOKEN(token, JES_COMMA, ctx->offset, 1)
+        UPDATE_TOKEN(token, JES_TOKEN_COMMA, ctx->offset, 1)
         break;
       }
 
       if (ch == '\"') {
         /* Use the jes_token_type_str offset since '\"' won't be a part of token. */
-        UPDATE_TOKEN(token, JES_STRING, ctx->offset + 1, 0);
+        UPDATE_TOKEN(token, JES_TOEKN_STRING, ctx->offset + 1, 0);
         if (IS_EOF_AHEAD(ctx)) {
-          UPDATE_TOKEN(token, JES_INVALID, ctx->offset, 1);
+          UPDATE_TOKEN(token, JES_TOKEN_INVALID, ctx->offset, 1);
           break;
         }
         continue;
       }
 
       if (IS_DIGIT(ch)) {
-        UPDATE_TOKEN(token, JES_NUMBER, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_TOKEN_NUMBER, ctx->offset, 1);
         /* NUMBERs do not have dedicated enclosing symbols like STRINGs.
            To prevent the tokenizer to consume too much characters, we need to
            look ahead and stop the process if the jes_token_type_str character is one of
@@ -367,24 +368,24 @@ static struct jes_token jes_get_token(struct jes_parser_context *ctx)
 
       if (ch == '-') {
         if (!IS_EOF_AHEAD(ctx) && IS_DIGIT(LOOK_AHEAD(ctx))) {
-          UPDATE_TOKEN(token, JES_NUMBER, ctx->offset, 1);
+          UPDATE_TOKEN(token, JES_TOKEN_NUMBER, ctx->offset, 1);
           continue;
         }
-        UPDATE_TOKEN(token, JES_INVALID, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_TOKEN_INVALID, ctx->offset, 1);
         break;
       }
 
       if ((ch == 't') || (ch == 'f')) {
         if ((LOOK_AHEAD(ctx) < 'a') || (LOOK_AHEAD(ctx) > 'z')) {
-          UPDATE_TOKEN(token, JES_INVALID, ctx->offset, 1);
+          UPDATE_TOKEN(token, JES_TOKEN_INVALID, ctx->offset, 1);
           break;
         }
-        UPDATE_TOKEN(token, JES_BOOLEAN, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_TOKEN_BOOLEAN, ctx->offset, 1);
         continue;
       }
 
       if (ch == 'n') {
-        UPDATE_TOKEN(token, JES_NULL, ctx->offset, 1);
+        UPDATE_TOKEN(token, JES_TOKEN_NULL, ctx->offset, 1);
         continue;
       }
 
@@ -393,10 +394,10 @@ static struct jes_token jes_get_token(struct jes_parser_context *ctx)
         continue;
       }
 
-      UPDATE_TOKEN(token, JES_INVALID, ctx->offset, 1);
+      UPDATE_TOKEN(token, JES_TOKEN_INVALID, ctx->offset, 1);
       break;
     }
-    else if (token.type == JES_STRING) {
+    else if (token.type == JES_TOEKN_STRING) {
 
       /* We'll not deliver '\"' symbol as a part of token. */
       if (ch == '\"') {
@@ -405,7 +406,7 @@ static struct jes_token jes_get_token(struct jes_parser_context *ctx)
 
       if (ch == '\\') {
         if (LOOK_AHEAD(ctx) != 'n') {
-          token.type = JES_INVALID;
+          token.type = JES_TOKEN_INVALID;
           break;
         }
       }
@@ -413,7 +414,7 @@ static struct jes_token jes_get_token(struct jes_parser_context *ctx)
       token.size++;
       continue;
     }
-    else if (token.type == JES_NUMBER) {
+    else if (token.type == JES_TOKEN_NUMBER) {
 
       if (IS_DIGIT(ch)) {
         token.size++;
@@ -426,7 +427,7 @@ static struct jes_token jes_get_token(struct jes_parser_context *ctx)
       if (ch == '.') {
         token.size++;
         if (!IS_DIGIT(LOOK_AHEAD(ctx))) {
-          token.type = JES_INVALID;
+          token.type = JES_TOKEN_INVALID;
           break;
         }
         continue;
@@ -436,10 +437,10 @@ static struct jes_token jes_get_token(struct jes_parser_context *ctx)
         break;
       }
 
-      token.type = JES_INVALID;
+      token.type = JES_TOKEN_INVALID;
       break;
 
-    } else if (token.type == JES_BOOLEAN) {
+    } else if (token.type == JES_TOKEN_BOOLEAN) {
       token.size++;
       /* Look ahead to find symbols signaling the end of token. */
       if ((LOOK_AHEAD(ctx) == ',') ||
@@ -461,11 +462,11 @@ static struct jes_token jes_get_token(struct jes_parser_context *ctx)
           break;
         }
         /* The token is neither true nor false. */
-        token.type = JES_INVALID;
+        token.type = JES_TOKEN_INVALID;
         break;
       }
       continue;
-    } else if (token.type == JES_NULL) {
+    } else if (token.type == JES_TOKEN_NULL) {
       token.size++;
       /* Look ahead to find symbols signaling the end of token. */
       if ((LOOK_AHEAD(ctx) == ',') ||
@@ -479,13 +480,13 @@ static struct jes_token jes_get_token(struct jes_parser_context *ctx)
         if (memcmp("null", &ctx->json_data[token.offset], compare_size) == 0) {
           break;
         }
-        token.type = JES_INVALID;
+        token.type = JES_TOKEN_INVALID;
         break;
       }
       continue;
     }
 
-    token.type = JES_INVALID;
+    token.type = JES_TOKEN_INVALID;
     break;
   }
 
@@ -499,12 +500,12 @@ static bool jes_accept(struct jes_parser_context *ctx, enum jes_token_type token
 {
   if (ctx->token.type == token_type) {
     switch (node_type) {
-      case JES_OBJECT:
-      case JES_KEY:
-      case JES_VALUE:
-      case JES_ARRAY:
+      case JES_NODE_OBJECT:    /* Fall through intended. */
+      case JES_NODE_KEY:       /* Fall through intended. */
+      case JES_NODE_VALUE:     /* Fall through intended. */
+      case JES_NODE_ARRAY:
         ctx->mem_calc += sizeof(struct jes_node);
-        ctx->element_count++;
+        ctx->node_count++;
         ctx->node = jes_append_node(ctx, ctx->node, node_type, ctx->token.offset, ctx->token.size);
         if (!ctx->node) {
           printf("\n JES Allocation failed");
@@ -516,18 +517,30 @@ static bool jes_accept(struct jes_parser_context *ctx, enum jes_token_type token
 #endif
         break;
 
-      case JES_NONE:
-        if (token_type == JES_BRACE_CLOSE) {
+      case JES_NODE_NONE:
+        /* Some tokens signaling an upward move through the tree.
+           A ']' indicates the end of an Array and thus the end of a key:value
+                 pair. Go back to the parent object.
+           A '}' indicates the end of an object. Go back to the parent object
+           A ',' indicates the end of a value.
+                 if the value is a part of an array, go back parent array node.
+                 otherwise, go back to the parent object.
+        */
+        if (token_type == JES_TOKEN_CLOSING_BRACE) {
           ctx->node = jes_get_node_object_parent(&ctx->allocator, ctx->node);
         }
-        else if (token_type == JES_BRACKET_CLOSE) {
+        else if (token_type == JES_TOKEN_CLOSING_BRACKET) {
+          if (ctx->node->data.type != JES_NODE_OBJECT) {
+            ctx->node = jes_get_node_object_parent(&ctx->allocator, ctx->node);
+          }
           ctx->node = jes_get_node_object_parent(&ctx->allocator, ctx->node);
         }
-        else if ((token_type == JES_COMMA) && (ctx->node->data.type == JES_VALUE)) {
-          if (jes_get_parent_type(&ctx->allocator, ctx->node) ==  JES_ARRAY) {
+        else if ((token_type == JES_TOKEN_COMMA) &&
+                 (ctx->node->data.type == JES_NODE_VALUE)) {
+          if (jes_get_parent_type(&ctx->allocator, ctx->node) == JES_NODE_ARRAY) {
             ctx->node = jes_get_node_array_parent(&ctx->allocator, ctx->node);
           }
-          else if (jes_get_parent_type(&ctx->allocator, ctx->node) ==  JES_KEY) {
+          else {
             ctx->node = jes_get_node_object_parent(&ctx->allocator, ctx->node);
           }
         }
@@ -562,7 +575,7 @@ int jes_parse(struct jes_parser_context *ctx, char *json_data, uint32_t size)
   int result = 0;
 
   ctx->token = jes_get_token(ctx);
-  if (!jes_expect(ctx, JES_BRACKET_OPEN, JES_OBJECT)) {
+  if (!jes_expect(ctx, JES_TOKEN_OPENING_BRACKET, JES_NODE_OBJECT)) {
     return -1;
   }
 
@@ -570,67 +583,69 @@ int jes_parse(struct jes_parser_context *ctx, char *json_data, uint32_t size)
 
     switch (ctx->node->data.type) {
 
-      case JES_OBJECT:
-        if (jes_accept(ctx, JES_BRACKET_CLOSE, JES_NONE)) {
+      case JES_NODE_OBJECT:
+        if (jes_accept(ctx, JES_TOKEN_CLOSING_BRACKET, JES_NODE_NONE) ||
+            jes_accept(ctx, JES_TOKEN_COMMA, JES_NODE_NONE)) {
           continue;
         }
-        if (jes_expect(ctx, JES_STRING, JES_KEY)) {
+
+        if (jes_expect(ctx, JES_TOEKN_STRING, JES_NODE_KEY)) {
           continue;
         }
 
         result = -1;
         break;
 
-      case JES_KEY:
-        if (!jes_expect(ctx, JES_COLON, JES_NONE)) {
+      case JES_NODE_KEY:
+        if (!jes_expect(ctx, JES_TOKEN_COLON, JES_NODE_NONE)) {
             break;
         }
-        if (jes_accept(ctx, JES_STRING, JES_VALUE)  ||
-            jes_accept(ctx, JES_NUMBER, JES_VALUE)  ||
-            jes_accept(ctx, JES_BOOLEAN, JES_VALUE) ||
-            jes_accept(ctx, JES_NULL, JES_VALUE)) {
+        if (jes_accept(ctx, JES_TOEKN_STRING, JES_NODE_VALUE)  ||
+            jes_accept(ctx, JES_TOKEN_NUMBER, JES_NODE_VALUE)  ||
+            jes_accept(ctx, JES_TOKEN_BOOLEAN, JES_NODE_VALUE) ||
+            jes_accept(ctx, JES_TOKEN_NULL, JES_NODE_VALUE)) {
           continue;
         }
-        if (jes_accept(ctx, JES_BRACE_OPEN, JES_ARRAY)) {
+        if (jes_accept(ctx, JES_TOKEN_OPENING_BRACE, JES_NODE_ARRAY)) {
           continue;
         }
 
-        if (jes_expect(ctx, JES_BRACKET_OPEN, JES_OBJECT)) {
+        if (jes_expect(ctx, JES_TOKEN_OPENING_BRACKET, JES_NODE_OBJECT)) {
           continue;
         }
         result = -1;
         break;
 
-      case JES_VALUE:
-          if (jes_accept(ctx, JES_BRACE_CLOSE, JES_NONE) ||
-              jes_accept(ctx, JES_BRACKET_CLOSE, JES_NONE)) {
-            jes_accept(ctx, JES_COMMA, JES_NONE);
+      case JES_NODE_VALUE:
+          if (jes_accept(ctx, JES_TOKEN_CLOSING_BRACE, JES_NODE_NONE) ||
+              jes_accept(ctx, JES_TOKEN_CLOSING_BRACKET, JES_NODE_NONE)) {
+            jes_accept(ctx, JES_TOKEN_COMMA, JES_NODE_NONE);
             continue;
           }
 
-          if (jes_expect(ctx, JES_COMMA, JES_NONE)) {
+          if (jes_expect(ctx, JES_TOKEN_COMMA, JES_NODE_NONE)) {
             continue;
           }
         result = -1;
         break;
-      case JES_ARRAY:
-        if (jes_accept(ctx, JES_BRACE_OPEN, JES_ARRAY)) {
+      case JES_NODE_ARRAY:
+        if (jes_accept(ctx, JES_TOKEN_OPENING_BRACE, JES_NODE_ARRAY)) {
           continue;
         }
 
-        if (jes_accept(ctx, JES_BRACKET_OPEN, JES_OBJECT)) {
+        if (jes_accept(ctx, JES_TOKEN_OPENING_BRACKET, JES_NODE_OBJECT)) {
           continue;
         }
 
-        if (jes_accept(ctx, JES_STRING, JES_VALUE)  ||
-            jes_accept(ctx, JES_NUMBER, JES_VALUE)  ||
-            jes_accept(ctx, JES_BOOLEAN, JES_VALUE) ||
-            jes_accept(ctx, JES_NULL, JES_VALUE)) {
+        if (jes_accept(ctx, JES_TOEKN_STRING, JES_NODE_VALUE)  ||
+            jes_accept(ctx, JES_TOKEN_NUMBER, JES_NODE_VALUE)  ||
+            jes_accept(ctx, JES_TOKEN_BOOLEAN, JES_NODE_VALUE) ||
+            jes_accept(ctx, JES_TOKEN_NULL, JES_NODE_VALUE)) {
           continue;
         }
 
-        if (jes_expect(ctx, JES_BRACE_CLOSE, JES_NONE)) {
-          jes_accept(ctx, JES_COMMA, JES_NONE);
+        if (jes_expect(ctx, JES_TOKEN_CLOSING_BRACE, JES_NODE_NONE)) {
+          jes_accept(ctx, JES_TOKEN_COMMA, JES_NODE_NONE);
           continue;
         }
         result = -1;
@@ -658,8 +673,8 @@ void print_nodes(struct jes_parser_context *ctx)
 
   while (node) {
 
-    if (node->data.type == JES_NONE) {
-      printf("\nEND! reached a JES_NONE");
+    if (node->data.type == JES_NODE_NONE) {
+      printf("\nEND! reached a JES_NODE_NONE");
       break;
     }
 
@@ -668,11 +683,11 @@ void print_nodes(struct jes_parser_context *ctx)
       break;
     }
 
-    if (node->data.type == JES_OBJECT) {
+    if (node->data.type == JES_NODE_OBJECT) {
       printf("\n    { <%s>", jes_node_type_str[node->data.type]);
-    } else if (node->data.type == JES_KEY) {
+    } else if (node->data.type == JES_NODE_KEY) {
       printf("\n        %.*s <%s> :", node->data.size, &ctx->json_data[node->data.offset], jes_node_type_str[node->data.type]);
-    } else if (node->data.type == JES_ARRAY) {
+    } else if (node->data.type == JES_NODE_ARRAY) {
       //printf("\n            %.*s <%s>", node.size, &ctx->json_data[node.offset], jes_node_type_str[node.type]);
     } else {
       printf("\n            %.*s <%s>", node->data.size, &ctx->json_data[node->data.offset], jes_node_type_str[node->data.type]);
@@ -724,9 +739,12 @@ int main(void)
 
   if (0 == jes_parse(&ctx, file_data, sizeof(file_data))) {
     printf("\nSize of JSON data: %d bytes", strnlen(file_data, sizeof(file_data)));
-    printf("\nMemory required: %d bytes for %d elements.", ctx.mem_calc, ctx.element_count);
+    printf("\nMemory required: %d bytes for %d elements.", ctx.mem_calc, ctx.node_count);
     printf("\nMemory consumed: %d elements.", ctx.allocator.allocated);
     print_nodes(&ctx);
+  }
+  else {
+    printf("\nFAILED");
   }
   return 0;
 }

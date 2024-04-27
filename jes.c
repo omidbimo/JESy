@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <assert.h>
+#include "jes.h"
 
 #define LOG
 
@@ -25,6 +26,10 @@
 #define HAS_CHILD(node_ptr) (node_ptr->child > -1)
 #define HAS_NEXT(node_ptr) (node_ptr->next > -1)
 #define HAS_PARENT(node_ptr) (node_ptr->parent > -1)
+
+#define GET_CONTEXT(pacx_)
+#define GET_PARSER_CONTEXT(tnode_)
+#define GET_TREE_NODE(node_)
 
 static char jes_token_type_str[][20] = {
   "EOF          ",
@@ -66,20 +71,6 @@ enum jes_token_type {
   JES_TOKEN_INVALID,
 };
 
-enum jes_node_type {
-  JES_NODE_NONE = 0,
-  JES_NODE_OBJECT,
-  JES_NODE_KEY,
-  JES_NODE_VALUE,
-  JES_NODE_ARRAY,
-};
-
-struct jes_node {
-  uint16_t type; /* of type enum jes_node_type */
-  uint16_t size;
-  uint32_t offset;
-};
-
 typedef int16_t jes_node_descriptor;
 
 struct jes_tree_node {
@@ -111,12 +102,6 @@ struct jes_parser_context {
   void  *free;
 };
 
-struct jes_context {
-  uint32_t  error;
-  uint32_t  node_count;
-  struct jes_parser_context *pacx;
-};
-
 static void jes_log(struct jes_parser_context *ctx, const struct jes_token *token)
 {
   printf("\n    JES::Token: [Pos: %5d, Len: %3d] %s \"%.*s\"",
@@ -140,8 +125,6 @@ static struct jes_tree_node* jes_allocate_node(struct jes_parser_context *pacx)
   }
   return new_node;
 }
-
-
 
 static struct jes_tree_node* jes_get_node_parent(struct jes_parser_context *pacx, struct jes_tree_node *node)
 {
@@ -742,15 +725,38 @@ int main(void)
   return 0;
 }
 
-
-struct jes_node *jes_get_child(struct jes_node *node)
+struct jes_node jes_root(struct jes_context *ctx)
 {
-
-
+  if (ctx) {
+    ctx->pacx->iter = ctx->pacx->root;
+    return ctx->pacx->iter->data;
+  }
+  return (struct jes_node){ 0 };
 }
 
-struct jes_node *jes_get_next(struct jes_node *node)
+struct jes_node jes_get_parent(struct jes_context *ctx)
 {
+  if ((ctx) && HAS_PARENT(ctx->pacx->iter)) {
+    ctx->pacx->iter = &ctx->pacx->pool[ctx->pacx->iter->parent];
+    return ctx->pacx->iter->data;
+  }
+  return (struct jes_node){ 0 };
+}
 
+struct jes_node jes_get_child(struct jes_context *ctx)
+{
+  if ((ctx) && HAS_CHILD(ctx->pacx->iter)) {
+    ctx->pacx->iter = &ctx->pacx->pool[ctx->pacx->iter->child];
+    return ctx->pacx->iter->data;
+  }
+  return (struct jes_node){ 0 };
+}
 
+struct jes_node jes_get_next(struct jes_context *ctx)
+{
+  if ((ctx) && HAS_NEXT(ctx->pacx->iter)) {
+    ctx->pacx->iter = &ctx->pacx->pool[ctx->pacx->iter->next];
+    return ctx->pacx->iter->data;
+  }
+  return (struct jes_node){ 0 };
 }

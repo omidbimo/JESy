@@ -88,8 +88,9 @@ struct jes_token {
 };
 
 struct jes_parser_context {
-  uint32_t  json_size;
   uint8_t   *json_data;
+  uint32_t  json_size;
+
   int32_t   offset;
   uint32_t  pool_size;
   uint16_t  capacity;
@@ -456,9 +457,12 @@ static bool jes_accept(struct jes_parser_context *pacx,
 {
   if (pacx->token.type == token_type) {
     switch (node_type) {
-      case JES_NODE_OBJECT:    /* Fall through intended. */
-      case JES_NODE_KEY:       /* Fall through intended. */
-      case JES_NODE_VALUE:     /* Fall through intended. */
+      case JES_NODE_OBJECT:         /* Fall through intended. */
+      case JES_NODE_KEY:            /* Fall through intended. */
+      case JES_NODE_VALUE_STRING:   /* Fall through intended. */
+      case JES_NODE_VALUE_NUMBER:   /* Fall through intended. */
+      case JES_NODE_VALUE_BOOLEAN:  /* Fall through intended. */
+      case JES_NODE_VALUE_NULL:     /* Fall through intended. */
       case JES_NODE_ARRAY:
         pacx->iter = jes_append_node(pacx, pacx->iter, node_type, pacx->token.offset, pacx->token.size);
         if (!pacx->iter) {
@@ -490,7 +494,10 @@ static bool jes_accept(struct jes_parser_context *pacx,
           pacx->iter = jes_get_node_object_parent(pacx, pacx->iter);
         }
         else if ((token_type == JES_TOKEN_COMMA) &&
-                 (pacx->iter->data.type == JES_NODE_VALUE)) {
+                 (pacx->iter->data.type == JES_NODE_VALUE_STRING  ||
+                  pacx->iter->data.type == JES_NODE_VALUE_NUMBER  ||
+                  pacx->iter->data.type == JES_NODE_VALUE_BOOLEAN ||
+                  pacx->iter->data.type == JES_NODE_VALUE_NULL)) {
           if (jes_get_parent_type(pacx, pacx->iter) == JES_NODE_ARRAY) {
             pacx->iter = jes_get_node_array_parent(pacx, pacx->iter);
           }
@@ -585,10 +592,10 @@ struct jes_context* jes_parse(char *json_data, uint32_t size,
         if (!jes_expect(pacx, JES_TOKEN_COLON, JES_NODE_NONE)) {
             break;
         }
-        if (jes_accept(pacx, JES_TOEKN_STRING, JES_NODE_VALUE)  ||
-            jes_accept(pacx, JES_TOKEN_NUMBER, JES_NODE_VALUE)  ||
-            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_NODE_VALUE) ||
-            jes_accept(pacx, JES_TOKEN_NULL, JES_NODE_VALUE)    ||
+        if (jes_accept(pacx, JES_TOEKN_STRING, JES_NODE_VALUE_STRING)  ||
+            jes_accept(pacx, JES_TOKEN_NUMBER, JES_NODE_VALUE_NUMBER)  ||
+            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_NODE_VALUE_BOOLEAN) ||
+            jes_accept(pacx, JES_TOKEN_NULL, JES_NODE_VALUE_NULL)    ||
             jes_accept(pacx, JES_TOKEN_OPENING_BRACE, JES_NODE_ARRAY)) {
           continue;
         }
@@ -600,7 +607,10 @@ struct jes_context* jes_parse(char *json_data, uint32_t size,
         ctx->error -1;
         break;
 
-      case JES_NODE_VALUE:
+      case JES_NODE_VALUE_STRING:
+      case JES_NODE_VALUE_NUMBER:
+      case JES_NODE_VALUE_BOOLEAN:
+      case JES_NODE_VALUE_NULL:
           if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACE, JES_NODE_NONE) ||
               jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NODE_NONE)) {
             jes_accept(pacx, JES_TOKEN_COMMA, JES_NODE_NONE);
@@ -615,10 +625,10 @@ struct jes_context* jes_parse(char *json_data, uint32_t size,
       case JES_NODE_ARRAY:
         if (jes_accept(pacx, JES_TOKEN_OPENING_BRACE, JES_NODE_ARRAY)    ||
             jes_accept(pacx, JES_TOKEN_OPENING_BRACKET, JES_NODE_OBJECT) ||
-            jes_accept(pacx, JES_TOEKN_STRING, JES_NODE_VALUE)           ||
-            jes_accept(pacx, JES_TOKEN_NUMBER, JES_NODE_VALUE)           ||
-            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_NODE_VALUE)          ||
-            jes_accept(pacx, JES_TOKEN_NULL, JES_NODE_VALUE)) {
+            jes_accept(pacx, JES_TOEKN_STRING, JES_NODE_VALUE_STRING)    ||
+            jes_accept(pacx, JES_TOKEN_NUMBER, JES_NODE_VALUE_NUMBER)    ||
+            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_NODE_VALUE_BOOLEAN)  ||
+            jes_accept(pacx, JES_TOKEN_NULL, JES_NODE_VALUE_NULL)) {
           continue;
         }
 
@@ -638,57 +648,6 @@ struct jes_context* jes_parse(char *json_data, uint32_t size,
 
   ctx->node_count = pacx->allocated;
   return ctx;
-}
-
-void print_nodes(struct jes_context *ctx)
-{
-  struct jes_tree_node *node = ctx->pacx->root;
-
-  uint32_t idx;
-  for (idx = 0; idx < ctx->pacx->allocated; idx++) {
-    printf("\n    %d. %s,   parent:%d, next:%d, child:%d", idx, jes_node_type_str[ctx->pacx->pool[idx].data.type],
-      ctx->pacx->pool[idx].parent, ctx->pacx->pool[idx].next, ctx->pacx->pool[idx].child);
-  }
-
-  while (node) {
-
-    if (node->data.type == JES_NODE_NONE) {
-      printf("\nEND! reached a JES_NODE_NONE");
-      break;
-    }
-
-    if (node->self == -1) {
-      printf("\nEND! Reached a -1 self!");
-      break;
-    }
-
-    if (node->data.type == JES_NODE_OBJECT) {
-      printf("\n    { <%s>", jes_node_type_str[node->data.type]);
-    } else if (node->data.type == JES_NODE_KEY) {
-      printf("\n        %.*s <%s> :", node->data.size, node->data.start, jes_node_type_str[node->data.type]);
-    } else if (node->data.type == JES_NODE_ARRAY) {
-      //printf("\n            %.*s <%s>", node.size, &ctx->json_data[node.offset], jes_node_type_str[node.type]);
-    } else {
-      printf("\n            %.*s <%s>", node->data.size, node->data.start, jes_node_type_str[node->data.type]);
-    }
-
-    if (HAS_CHILD(node)) {
-      node = jes_get_node_child(ctx->pacx, node);
-      continue;
-    }
-
-    if (HAS_NEXT(node)) {
-      node = jes_get_node_next(ctx->pacx, node);
-      continue;
-    }
-
-    while (node = jes_get_node_parent(ctx->pacx, node)) {
-      if (HAS_NEXT(node)) {
-        node = jes_get_node_next(ctx->pacx, node);
-        break;
-      }
-    }
-  }
 }
 
 int main(void)
@@ -717,7 +676,7 @@ int main(void)
   if (ctx) {
     printf("\nSize of JSON data: %d bytes", strnlen(file_data, sizeof(file_data)));
     printf("\nMemory required: %d bytes for %d elements.", ctx->node_count*sizeof(struct jes_tree_node), ctx->node_count);
-    print_nodes(ctx);
+    //jes_print(ctx);
   }
   else {
     printf("\nFAILED");
@@ -725,7 +684,7 @@ int main(void)
   return 0;
 }
 
-struct jes_node jes_root(struct jes_context *ctx)
+struct jes_node jes_get_root(struct jes_context *ctx)
 {
   if (ctx) {
     ctx->pacx->iter = ctx->pacx->root;
@@ -759,4 +718,9 @@ struct jes_node jes_get_next(struct jes_context *ctx)
     return ctx->pacx->iter->data;
   }
   return (struct jes_node){ 0 };
+}
+
+void jes_reset_iterator(struct jes_context *ctx)
+{
+  ctx->pacx->iter = ctx->pacx->root;
 }

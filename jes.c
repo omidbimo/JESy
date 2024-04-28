@@ -217,7 +217,7 @@ static struct jes_tree_node* jes_append_node(struct jes_parser_context *pacx,
   if (new_node >= 0) {
     new_node->data.type = type;
     new_node->data.size = size;
-    new_node->data.offset = offset;
+    new_node->data.start = &pacx->json_data[offset];
     if (node) {
       new_node->parent = node->self;
 
@@ -665,11 +665,11 @@ void print_nodes(struct jes_context *ctx)
     if (node->data.type == JES_NODE_OBJECT) {
       printf("\n    { <%s>", jes_node_type_str[node->data.type]);
     } else if (node->data.type == JES_NODE_KEY) {
-      printf("\n        %.*s <%s> :", node->data.size, &ctx->pacx->json_data[node->data.offset], jes_node_type_str[node->data.type]);
+      printf("\n        %.*s <%s> :", node->data.size, node->data.start, jes_node_type_str[node->data.type]);
     } else if (node->data.type == JES_NODE_ARRAY) {
       //printf("\n            %.*s <%s>", node.size, &ctx->json_data[node.offset], jes_node_type_str[node.type]);
     } else {
-      printf("\n            %.*s <%s>", node->data.size, &ctx->pacx->json_data[node->data.offset], jes_node_type_str[node->data.type]);
+      printf("\n            %.*s <%s>", node->data.size, node->data.start, jes_node_type_str[node->data.type]);
     }
 
     if (HAS_CHILD(node)) {

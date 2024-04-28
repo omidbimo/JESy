@@ -1,6 +1,8 @@
 #ifndef JES_H
 #define JES_H
 
+#define FOR_EACH()
+
 struct jes_parser_context;
 
 struct jes_context {
@@ -20,7 +22,7 @@ enum jes_node_type {
 struct jes_node {
   uint16_t type; /* of type enum jes_node_type */
   uint16_t size;
-  uint32_t offset;
+  uint8_t  *start;
 };
 
 struct jes_context* jes_parse(char *json_data, uint32_t size,

@@ -81,6 +81,10 @@ struct jes_tree_node {
   struct jes_node data;
 };
 
+struct jes_tree_free_node {
+  struct jes_tree_free_node *next;
+};
+
 struct jes_token {
   enum jes_token_type type;
   uint32_t offset;
@@ -100,7 +104,7 @@ struct jes_parser_context {
   struct jes_tree_node *iter;
   struct jes_tree_node *root;
   struct jes_tree_node *pool;
-  void  *free;
+  struct jes_tree_free_node *free;
 };
 
 static void jes_log(struct jes_parser_context *ctx, const struct jes_token *token)
@@ -110,21 +114,50 @@ static void jes_log(struct jes_parser_context *ctx, const struct jes_token *toke
           token->size, &ctx->json_data[token->offset]);
 }
 
-static struct jes_tree_node* jes_allocate_node(struct jes_parser_context *pacx)
+static struct jes_tree_node* jes_allocate(struct jes_parser_context *pacx)
 {
   struct jes_tree_node *new_node = NULL;
 
-  if (pacx->index < pacx->capacity) {
-    new_node = &pacx->pool[pacx->index];
+  if (pacx->allocated < pacx->capacity) {
+    if (pacx->free) {
+      /* Pop the first node from free list */
+      new_node = (struct jes_tree_node*)pacx->free;
+      pacx->free = pacx->free->next;
+    }
+    else {
+      assert(pacx->index < pacx->capacity);
+      new_node = &pacx->pool[pacx->index];
+      pacx->index++;
+    }
     memset(new_node, 0, sizeof(*new_node));
-    new_node->self = pacx->index;
+    new_node->self = new_node - pacx->pool;
     new_node->parent = -1;
     new_node->child = -1;
     new_node->next = -1;
     pacx->allocated++;
-    pacx->index++;
   }
+
   return new_node;
+}
+
+static void jes_free(struct jes_parser_context *pacx, struct jes_tree_node *node)
+{
+  struct jes_tree_free_node *free_node = (struct jes_tree_free_node*)node;
+
+  assert(node >= pacx->pool);
+  assert(node < (pacx->pool + pacx->capacity));
+  assert(pacx->allocated > 0);
+
+  if (pacx->allocated > 0) {
+    free_node->next = NULL;
+    pacx->allocated--;
+    /* prepend the node to the free LIFO */
+    if (pacx->free) {
+      free_node->next = pacx->free->next;
+    }
+
+    pacx->free = free_node;
+  }
 }
 
 static struct jes_tree_node* jes_get_node_parent(struct jes_parser_context *pacx, struct jes_tree_node *node)
@@ -213,7 +246,7 @@ static enum jes_node_type jes_get_parent_type(struct jes_parser_context *pacx, s
 static struct jes_tree_node* jes_append_node(struct jes_parser_context *pacx,
      struct jes_tree_node *node, uint16_t type, uint32_t offset, uint16_t size)
 {
-  struct jes_tree_node *new_node = jes_allocate_node(pacx);
+  struct jes_tree_node *new_node = jes_allocate(pacx);
 
   if (new_node >= 0) {
     new_node->data.type = type;

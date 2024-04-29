@@ -31,6 +31,7 @@
 #define GET_PARSER_CONTEXT(tnode_)
 #define GET_TREE_NODE(node_)
 
+
 static char jes_token_type_str[][20] = {
   "EOF          ",
   "OPENING_BRACKET ",
@@ -106,6 +107,9 @@ struct jes_parser_context {
   struct jes_tree_node *pool;
   struct jes_tree_free_node *free;
 };
+
+static struct jes_tree_node *jes_find_duplicated_key(struct jes_parser_context *pacx,
+              struct jes_tree_node *object_node, struct jes_token *key_token);
 
 static void jes_log(struct jes_parser_context *ctx, const struct jes_token *token)
 {
@@ -275,6 +279,12 @@ static struct jes_tree_node* jes_append_node(struct jes_parser_context *pacx,
   return new_node;
 }
 
+static void jes_delete_node(struct jes_parser_context *pacx, struct jes_tree_node *node)
+{
+  struct jes_tree_node *iter;
+
+
+}
 static struct jes_token jes_get_token(struct jes_parser_context *pacx)
 {
   struct jes_token token = { 0 };
@@ -485,13 +495,53 @@ static struct jes_token jes_get_token(struct jes_parser_context *pacx)
   return token;
 }
 
+static struct jes_tree_node *jes_find_duplicated_key(struct jes_parser_context *pacx,
+              struct jes_tree_node *object_node, struct jes_token *key_token)
+{
+  struct jes_tree_node *duplicated = NULL;
+
+  if (object_node->data.type == JES_NODE_OBJECT)
+  {
+    struct jes_tree_node *iter = object_node;
+    if (HAS_CHILD(iter)) {
+      iter = jes_get_node_child(pacx, iter);
+      assert(iter->data.type == JES_NODE_KEY);
+      if ((iter->data.size == key_token->size) &&
+          (memcmp(iter->data.start, &pacx->json_data[key_token->offset], key_token->size) == 0)) {
+        printf("!!!!!!!!!!Duplicated!");
+        duplicated = iter;
+      }
+      else {
+        while (HAS_NEXT(iter)) {
+          iter = jes_get_node_next(pacx, iter);
+          if ((iter->data.size == key_token->size) &&
+              (memcmp(iter->data.start, &pacx->json_data[key_token->offset], key_token->size) == 0)) {
+            printf("!!!!!!!!!!Duplicated!");
+            duplicated = iter;
+          }
+        }
+      }
+    }
+  }
+  return duplicated;
+}
+
 static bool jes_accept(struct jes_parser_context *pacx,
                   enum jes_token_type token_type, enum jes_node_type node_type)
 {
   if (pacx->token.type == token_type) {
     switch (node_type) {
-      case JES_NODE_OBJECT:         /* Fall through intended. */
       case JES_NODE_KEY:            /* Fall through intended. */
+      {
+        /* If there is already a key with the same name, we'll overwrite it. */
+        struct jes_tree_node *node = jes_find_duplicated_key(pacx, pacx->iter, &pacx->token);
+        if (node) {
+          jes_delete_node(pacx, jes_get_node_child(pacx, node));
+          pacx->iter = node;
+          break;
+        }
+      }
+      case JES_NODE_OBJECT:         /* Fall through intended. */
       case JES_NODE_VALUE_STRING:   /* Fall through intended. */
       case JES_NODE_VALUE_NUMBER:   /* Fall through intended. */
       case JES_NODE_VALUE_BOOLEAN:  /* Fall through intended. */
@@ -683,6 +733,57 @@ struct jes_context* jes_parse(char *json_data, uint32_t size,
   return ctx;
 }
 
+void jes_print(struct jes_context *ctx)
+{
+  struct jes_tree_node *node = ctx->pacx->root;
+
+  uint32_t idx;
+  for (idx = 0; idx < ctx->pacx->allocated; idx++) {
+    printf("\n    %d. %s,   parent:%d, next:%d, child:%d", idx, jes_node_type_str[ctx->pacx->pool[idx].data.type],
+      ctx->pacx->pool[idx].parent, ctx->pacx->pool[idx].next, ctx->pacx->pool[idx].child);
+  }
+
+  while (node) {
+
+    if (node->data.type == JES_NODE_NONE) {
+      printf("\nEND! reached a JES_NODE_NONE");
+      break;
+    }
+
+    if (node->self == -1) {
+      printf("\nEND! Reached a -1 self!");
+      break;
+    }
+
+    if (node->data.type == JES_NODE_OBJECT) {
+      printf("\n    { <%s>", jes_node_type_str[node->data.type]);
+    } else if (node->data.type == JES_NODE_KEY) {
+      printf("\n        %.*s <%s> :", node->data.size, node->data.start, jes_node_type_str[node->data.type]);
+    } else if (node->data.type == JES_NODE_ARRAY) {
+      //printf("\n            %.*s <%s>", node.size, &ctx->json_data[node.offset], jes_node_type_str[node.type]);
+    } else {
+      printf("\n            %.*s <%s>", node->data.size, node->data.start, jes_node_type_str[node->data.type]);
+    }
+
+    if (HAS_CHILD(node)) {
+      node = jes_get_node_child(ctx->pacx, node);
+      continue;
+    }
+
+    if (HAS_NEXT(node)) {
+      node = jes_get_node_next(ctx->pacx, node);
+      continue;
+    }
+
+    while (node = jes_get_node_parent(ctx->pacx, node)) {
+      if (HAS_NEXT(node)) {
+        node = jes_get_node_next(ctx->pacx, node);
+        break;
+      }
+    }
+  }
+}
+
 int main(void)
 {
   struct jes_context *ctx;
@@ -709,7 +810,7 @@ int main(void)
   if (ctx) {
     printf("\nSize of JSON data: %d bytes", strnlen(file_data, sizeof(file_data)));
     printf("\nMemory required: %d bytes for %d elements.", ctx->node_count*sizeof(struct jes_tree_node), ctx->node_count);
-    //jes_print(ctx);
+    jes_print(ctx);
   }
   else {
     printf("\nFAILED");

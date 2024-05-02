@@ -6,8 +6,9 @@
 struct jes_parser_context;
 
 struct jes_context {
-  uint32_t  error;
-  uint32_t  node_count;
+  uint32_t error;
+  uint32_t node_count;
+  uint32_t dump_size;
   struct jes_parser_context *pacx;
 };
 

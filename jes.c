@@ -60,13 +60,20 @@ static char jes_node_type_str[][20] = {
   "VALUE_NULL",
 };
 
+static char jes_state_str[][20] = {
+  "STATE_START",
+  "STATE_WANT_KEY",
+  "STATE_WANT_VALUE",
+  "STATE_WANT_ARRAY",
+  "STATE_COMPOSITE_END",
+};
 enum jes_token_type {
   JES_TOKEN_EOF = 0,
   JES_TOKEN_OPENING_BRACKET,
   JES_TOKEN_CLOSING_BRACKET,
   JES_TOKEN_OPENING_BRACE,
   JES_TOKEN_CLOSING_BRACE,
-  JES_TOEKN_STRING,
+  JES_TOKEN_STRING,
   JES_TOKEN_NUMBER,
   JES_TOKEN_BOOLEAN,
   JES_TOKEN_NULL,
@@ -74,6 +81,14 @@ enum jes_token_type {
   JES_TOKEN_COMMA,
   JES_TOKEN_ESC,
   JES_TOKEN_INVALID,
+};
+
+enum jes_parser_state {
+  JES_STATE_START = 0,
+  JES_STATE_WANT_KEY,
+  JES_STATE_WANT_VALUE,
+  JES_STATE_WANT_ARRAY,
+  JES_STATE_COMPOSITE_END,
 };
 
 typedef int16_t jes_node_descriptor;
@@ -84,7 +99,6 @@ struct jes_tree_node {
   jes_node_descriptor left;
   jes_node_descriptor right;
   jes_node_descriptor child;
-
 };
 
 struct jes_tree_free_node {
@@ -100,12 +114,12 @@ struct jes_token {
 struct jes_parser_context {
   uint8_t   *json_data;
   uint32_t  json_size;
-
   int32_t   offset;
   uint32_t  pool_size;
   uint16_t  capacity;
   uint16_t  allocated;
   int16_t   index;
+  enum jes_parser_state state;
   struct jes_token token;
   struct jes_tree_node *iter;
   struct jes_tree_node *root;
@@ -179,6 +193,23 @@ static struct jes_tree_node* jes_get_parent_node(struct jes_parser_context *pacx
   return NULL;
 }
 
+static struct jes_tree_node* jes_get_parent_node_bytype(struct jes_parser_context *pacx,
+                                                        struct jes_tree_node *node,
+                                                        enum jes_node_type type)
+{
+  struct jes_tree_node *parent = NULL;
+  /* TODO: add checkings */
+  while (node && HAS_PARENT(node)) {
+    node = &pacx->pool[node->parent];
+    if (node->data.type == type) {
+      parent = node;
+      break;
+    }
+  }
+
+  return parent;
+}
+
 static struct jes_tree_node* jes_get_child_node(struct jes_parser_context *pacx,
                                                 struct jes_tree_node *node)
 {
@@ -212,65 +243,20 @@ static struct jes_tree_node* jes_get_left_node(struct jes_parser_context *pacx,
   return NULL;
 }
 
-static struct jes_tree_node* jes_get_node_object_parent(struct jes_parser_context *pacx,
-                                                        struct jes_tree_node *node)
-{
-  struct jes_tree_node *parent = NULL;
-  /* TODO: add checkings */
-  while (node && HAS_PARENT(node)) {
-    node = &pacx->pool[node->parent];
-    if (node->data.type == JES_NODE_OBJECT) {
-      parent = node;
-      break;
-    }
-  }
-
-  return parent;
-}
-
-static struct jes_tree_node* jes_get_node_key_parent(struct jes_parser_context *pacx,
-                                                     struct jes_tree_node *node)
-{
-  struct jes_tree_node *parent = NULL;
-  /* TODO: add checkings */
-  while (HAS_PARENT(node)) {
-    node = &pacx->pool[node->parent];
-    if (node->data.type == JES_NODE_KEY) {
-      parent = node;
-      break;
-    }
-  }
-
-  return parent;
-}
-
-static struct jes_tree_node* jes_get_node_array_parent(struct jes_parser_context *pacx,
-                                                       struct jes_tree_node *node)
-{
-  struct jes_tree_node *parent = NULL;
-  /* TODO: add checkings */
-  while (HAS_PARENT(node)) {
-    node = &pacx->pool[node->parent];
-    if (node->data.type == JES_NODE_ARRAY) {
-      parent = node;
-      break;
-    }
-  }
-
-  return parent;
-}
-
 static enum jes_node_type jes_get_parent_type(struct jes_parser_context *pacx,
                                               struct jes_tree_node *node)
 {
   if (node) {
     return pacx->pool[node->parent].data.type;
   }
-  return JES_NODE_NONE;
+  return JES_NONE;
 }
 
-static struct jes_tree_node* jes_append_node(struct jes_parser_context *pacx,
-     struct jes_tree_node *node, uint16_t type, uint32_t offset, uint16_t size)
+static struct jes_tree_node* jes_add_node(struct jes_parser_context *pacx,
+                                          struct jes_tree_node *node,
+                                          uint16_t type,
+                                          uint32_t offset,
+                                          uint16_t size)
 {
   struct jes_tree_node *new_node = jes_allocate(pacx);
 
@@ -287,6 +273,7 @@ static struct jes_tree_node* jes_append_node(struct jes_parser_context *pacx,
           child = &pacx->pool[child->right];
         }
         child->right = new_node - pacx->pool; /* new_node's index */
+        new_node->left = child - pacx->pool;
       }
       else {
         node->child = new_node - pacx->pool; /* new_node's index */
@@ -394,7 +381,7 @@ static struct jes_token jes_get_token(struct jes_parser_context *pacx)
 
       if (ch == '\"') {
         /* Use the jes_token_type_str offset since '\"' won't be a part of token. */
-        UPDATE_TOKEN(token, JES_TOEKN_STRING, pacx->offset + 1, 0);
+        UPDATE_TOKEN(token, JES_TOKEN_STRING, pacx->offset + 1, 0);
         if (IS_EOF_AHEAD(pacx)) {
           UPDATE_TOKEN(token, JES_TOKEN_INVALID, pacx->offset, 1);
           break;
@@ -448,7 +435,7 @@ static struct jes_token jes_get_token(struct jes_parser_context *pacx)
       UPDATE_TOKEN(token, JES_TOKEN_INVALID, pacx->offset, 1);
       break;
     }
-    else if (token.type == JES_TOEKN_STRING) {
+    else if (token.type == JES_TOKEN_STRING) {
 
       /* We'll not deliver '\"' symbol as a part of token. */
       if (ch == '\"') {
@@ -552,12 +539,12 @@ static struct jes_tree_node *jes_find_duplicated_key(struct jes_parser_context *
 {
   struct jes_tree_node *duplicated = NULL;
 
-  if (object_node->data.type == JES_NODE_OBJECT)
+  if (object_node->data.type == JES_OBJECT)
   {
     struct jes_tree_node *iter = object_node;
     if (HAS_CHILD(iter)) {
       iter = jes_get_child_node(pacx, iter);
-      assert(iter->data.type == JES_NODE_KEY);
+      assert(iter->data.type == JES_KEY);
       if ((iter->data.size == key_token->size) &&
           (memcmp(iter->data.start, &pacx->json_data[key_token->offset], key_token->size) == 0)) {
         duplicated = iter;
@@ -577,11 +564,13 @@ static struct jes_tree_node *jes_find_duplicated_key(struct jes_parser_context *
 }
 
 static bool jes_accept(struct jes_parser_context *pacx,
-                  enum jes_token_type token_type, enum jes_node_type node_type)
+                       enum jes_token_type token_type,
+                       enum jes_node_type node_type,
+                       enum jes_parser_state state)
 {
   if (pacx->token.type == token_type) {
     switch (node_type) {
-      case JES_NODE_KEY:            /* Fall through intended. */
+      case JES_KEY:            /* Fall through intended. */
       {
         /* If there is already a key with the same name, we'll overwrite it. */
         struct jes_tree_node *node = jes_find_duplicated_key(pacx, pacx->iter, &pacx->token);
@@ -591,24 +580,24 @@ static bool jes_accept(struct jes_parser_context *pacx,
           break;
         }
       }
-      case JES_NODE_OBJECT:         /* Fall through intended. */
-      case JES_NODE_VALUE_STRING:   /* Fall through intended. */
-      case JES_NODE_VALUE_NUMBER:   /* Fall through intended. */
-      case JES_NODE_VALUE_BOOLEAN:  /* Fall through intended. */
-      case JES_NODE_VALUE_NULL:     /* Fall through intended. */
-      case JES_NODE_ARRAY:
-        pacx->iter = jes_append_node(pacx, pacx->iter, node_type, pacx->token.offset, pacx->token.size);
+      case JES_OBJECT:         /* Fall through intended. */
+      case JES_VALUE_STRING:   /* Fall through intended. */
+      case JES_VALUE_NUMBER:   /* Fall through intended. */
+      case JES_VALUE_BOOLEAN:  /* Fall through intended. */
+      case JES_VALUE_NULL:     /* Fall through intended. */
+      case JES_ARRAY:
+        pacx->iter = jes_add_node(pacx, pacx->iter, node_type, pacx->token.offset, pacx->token.size);
         if (!pacx->iter) {
           printf("\nJES Error! Allocation failed.");
           return false;
         }
 
 #ifdef LOG
-        printf("\n    JES::Node: %s", jes_node_type_str[node_type]);
+        printf("\n    JES::Node: %s, %s >>> %s", jes_node_type_str[node_type], jes_state_str[pacx->state], jes_state_str[state]);
 #endif
         break;
 
-      case JES_NODE_NONE:
+      case JES_NONE:
         /* Some tokens signaling an upward move through the tree.
            A ']' indicates the end of an Array and thus the end of a key:value
                  pair. Go back to the parent object.
@@ -618,24 +607,24 @@ static bool jes_accept(struct jes_parser_context *pacx,
                  otherwise, go back to the parent object.
         */
         if (token_type == JES_TOKEN_CLOSING_BRACE) {
-          pacx->iter = jes_get_node_object_parent(pacx, pacx->iter);
+          pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_OBJECT);
         }
         else if (token_type == JES_TOKEN_CLOSING_BRACKET) {
-          if (pacx->iter->data.type != JES_NODE_OBJECT) {
-            pacx->iter = jes_get_node_object_parent(pacx, pacx->iter);
+          if (pacx->iter->data.type != JES_OBJECT) {
+            pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_OBJECT);
           }
-          pacx->iter = jes_get_node_object_parent(pacx, pacx->iter);
+          pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_OBJECT);
         }
         else if ((token_type == JES_TOKEN_COMMA) &&
-                 (pacx->iter->data.type == JES_NODE_VALUE_STRING  ||
-                  pacx->iter->data.type == JES_NODE_VALUE_NUMBER  ||
-                  pacx->iter->data.type == JES_NODE_VALUE_BOOLEAN ||
-                  pacx->iter->data.type == JES_NODE_VALUE_NULL)) {
-          if (jes_get_parent_type(pacx, pacx->iter) == JES_NODE_ARRAY) {
-            pacx->iter = jes_get_node_array_parent(pacx, pacx->iter);
+                 (pacx->iter->data.type == JES_VALUE_STRING  ||
+                  pacx->iter->data.type == JES_VALUE_NUMBER  ||
+                  pacx->iter->data.type == JES_VALUE_BOOLEAN ||
+                  pacx->iter->data.type == JES_VALUE_NULL)) {
+          if (jes_get_parent_type(pacx, pacx->iter) == JES_ARRAY) {
+            pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_ARRAY);
           }
           else {
-            pacx->iter = jes_get_node_object_parent(pacx, pacx->iter);
+            pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_OBJECT);
           }
         }
 
@@ -645,15 +634,19 @@ static bool jes_accept(struct jes_parser_context *pacx,
         break;
     }
 
+    pacx->state = state;
     pacx->token = jes_get_token(pacx);
     return true;
   }
   return false;
 }
 
-static bool jes_expect(struct jes_parser_context *pacx, enum jes_token_type token_type, enum jes_node_type node_type)
+static bool jes_expect(struct jes_parser_context *pacx,
+                       enum jes_token_type token_type,
+                       enum jes_node_type node_type,
+                       enum jes_parser_state state)
 {
-  if (jes_accept(pacx, token_type, node_type)) {
+  if (jes_accept(pacx, token_type, node_type, state)) {
     return true;
   }
   printf("\nJES::Parser error! Unexpected Token. expected: %s, got: %s \"%.*s\"",
@@ -678,6 +671,7 @@ static void jes_init_parser(struct jes_parser_context *pacx,
   pacx->index = 0;
   pacx->iter = NULL;
   pacx->root = NULL;
+  pacx->state = JES_STATE_START;
 }
 
 struct jes_context* jes_parse(char *json_data, uint32_t size,
@@ -696,81 +690,90 @@ struct jes_context* jes_parse(char *json_data, uint32_t size,
   jes_init_parser(pacx, json_data, size, pacx + 1,
     pool_size - sizeof(struct jes_context) - sizeof(struct jes_parser_context));
 
-  /* Start parsing. Internal members of context: token and node have both
-     invalid values. Call get_token and accept once to setup these members. */
+  /* Fetch the first token to before entering the state machine. */
   pacx->token = jes_get_token(pacx);
-  if (!jes_expect(pacx, JES_TOKEN_OPENING_BRACKET, JES_NODE_OBJECT)) {
-    ctx->error -1;
-    return ctx;
-  }
 
-  while (pacx->iter) {
+  while (pacx->token.type != JES_TOKEN_EOF) {
 
-    switch (pacx->iter->data.type) {
-
-      case JES_NODE_OBJECT:
-        if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NODE_NONE) ||
-            jes_accept(pacx, JES_TOKEN_COMMA, JES_NODE_NONE)) {
+    switch (pacx->state) {
+      /* Only an opening bracket is acceptable in this state. */
+      case JES_STATE_START:
+        if (jes_expect(pacx, JES_TOKEN_OPENING_BRACKET, JES_OBJECT, JES_STATE_WANT_KEY)) {
           continue;
         }
-
-        if (jes_expect(pacx, JES_TOEKN_STRING, JES_NODE_KEY)) {
-          continue;
-        }
-
-        ctx->error -1;
+        ctx->error = -1;
         break;
 
-      case JES_NODE_KEY:
-        if (!jes_expect(pacx, JES_TOKEN_COLON, JES_NODE_NONE)) {
-            break;
-        }
-        if (jes_accept(pacx, JES_TOEKN_STRING, JES_NODE_VALUE_STRING)  ||
-            jes_accept(pacx, JES_TOKEN_NUMBER, JES_NODE_VALUE_NUMBER)  ||
-            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_NODE_VALUE_BOOLEAN) ||
-            jes_accept(pacx, JES_TOKEN_NULL, JES_NODE_VALUE_NULL)    ||
-            jes_accept(pacx, JES_TOKEN_OPENING_BRACE, JES_NODE_ARRAY)) {
+      /* An opening parenthesis has already been found.
+         A closing bracket is allowed. Otherwise, only a KEY is acceptable. */
+      case JES_STATE_WANT_KEY:
+        if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE, JES_STATE_COMPOSITE_END)) {
           continue;
         }
 
-        if (jes_expect(pacx, JES_TOKEN_OPENING_BRACKET, JES_NODE_OBJECT)) {
+        if (jes_expect(pacx, JES_TOKEN_STRING, JES_KEY, JES_STATE_WANT_VALUE) &&
+            jes_expect(pacx, JES_TOKEN_COLON, JES_NONE, JES_STATE_WANT_VALUE)) {
           continue;
         }
 
-        ctx->error -1;
+        ctx->error = -1;
         break;
 
-      case JES_NODE_VALUE_STRING:
-      case JES_NODE_VALUE_NUMBER:
-      case JES_NODE_VALUE_BOOLEAN:
-      case JES_NODE_VALUE_NULL:
-          if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACE, JES_NODE_NONE) ||
-              jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NODE_NONE)) {
-            jes_accept(pacx, JES_TOKEN_COMMA, JES_NODE_NONE);
+      /* A composites can be an Object, an Array or a Key/value pair.
+         When a composite is closed, another closing symbol is allowed.
+         Otherwise, only a separator is acceptable. */
+      case JES_STATE_COMPOSITE_END:
+        if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE, JES_STATE_COMPOSITE_END) ||
+            jes_accept(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE, JES_STATE_COMPOSITE_END)) {
+          continue;
+        }
+
+        if (jes_expect(pacx, JES_TOKEN_COMMA, JES_NONE, JES_STATE_WANT_KEY)) {
+          continue;
+        }
+
+        break;
+
+      case JES_STATE_WANT_VALUE:
+        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACKET, JES_OBJECT, JES_STATE_WANT_KEY)) {
+          continue;
+        }
+
+        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACE, JES_ARRAY, JES_STATE_WANT_ARRAY)) {
+          continue;
+        }
+
+        if (jes_accept(pacx, JES_TOKEN_STRING, JES_VALUE_STRING, JES_STATE_COMPOSITE_END) ||
+            jes_accept(pacx, JES_TOKEN_NUMBER, JES_VALUE_NUMBER, JES_STATE_COMPOSITE_END)   ||
+            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_VALUE_BOOLEAN, JES_STATE_COMPOSITE_END) ||
+            jes_accept(pacx, JES_TOKEN_NULL, JES_VALUE_NULL, JES_STATE_COMPOSITE_END)) {
+          continue;
+        }
+
+        ctx->error = -1;
+        break;
+
+      case JES_STATE_WANT_ARRAY:
+        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACKET, JES_OBJECT, JES_STATE_WANT_KEY)) {
+          continue;
+        }
+
+        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACE, JES_ARRAY, JES_STATE_WANT_ARRAY)) {
+          continue;
+        }
+
+        if (jes_accept(pacx, JES_TOKEN_STRING, JES_VALUE_STRING, JES_STATE_WANT_ARRAY) ||
+            jes_accept(pacx, JES_TOKEN_NUMBER, JES_VALUE_NUMBER, JES_STATE_WANT_ARRAY)   ||
+            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_VALUE_BOOLEAN, JES_STATE_WANT_ARRAY) ||
+            jes_accept(pacx, JES_TOKEN_NULL, JES_VALUE_NULL, JES_STATE_WANT_ARRAY)) {
+          if (jes_accept(pacx, JES_TOKEN_COMMA, JES_NONE, JES_STATE_WANT_ARRAY)) {
             continue;
           }
 
-          if (jes_expect(pacx, JES_TOKEN_COMMA, JES_NODE_NONE)) {
+          if (jes_expect(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE, JES_STATE_COMPOSITE_END)) {
             continue;
           }
-        ctx->error -1;
-        break;
-      case JES_NODE_ARRAY:
-        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACE, JES_NODE_ARRAY)    ||
-            jes_accept(pacx, JES_TOKEN_OPENING_BRACKET, JES_NODE_OBJECT) ||
-            jes_accept(pacx, JES_TOEKN_STRING, JES_NODE_VALUE_STRING)    ||
-            jes_accept(pacx, JES_TOKEN_NUMBER, JES_NODE_VALUE_NUMBER)    ||
-            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_NODE_VALUE_BOOLEAN)  ||
-            jes_accept(pacx, JES_TOKEN_NULL, JES_NODE_VALUE_NULL)) {
-          continue;
         }
-
-        if (jes_expect(pacx, JES_TOKEN_CLOSING_BRACE, JES_NODE_NONE)) {
-          jes_accept(pacx, JES_TOKEN_COMMA, JES_NODE_NONE);
-          continue;
-        }
-        ctx->error -1;
-        break;
 
       default:
         break;
@@ -781,6 +784,69 @@ struct jes_context* jes_parse(char *json_data, uint32_t size,
 
   ctx->node_count = pacx->allocated;
   return ctx;
+}
+
+int jes_serialize(struct jes_context *ctx, uint8_t *buffer, uint32_t len)
+{
+  struct jes_tree_node *iter = ctx->pacx->root;
+  uint8_t *dst = buffer;
+  int result = 0;
+  while (iter) {
+    switch (iter->data.type) {
+      case JES_OBJECT:
+        dst = (uint8_t*)memcpy(dst, "{ \n", sizeof("{ \n") - 1) + (sizeof("{ \n") - 1);
+        break;
+      case JES_KEY:
+        *dst++ = '"';
+        dst = (uint8_t*)memcpy(dst, iter->data.start, iter->data.size) + iter->data.size;
+        *dst++ = '"';
+        *dst++ = ':';
+        *dst++ = ' ';
+        break;
+      case JES_VALUE_STRING:
+        *dst++ = '"';
+        dst = (uint8_t*)memcpy(dst, iter->data.start, iter->data.size) + iter->data.size;
+        *dst++ = '"';
+        break;
+      case JES_VALUE_NUMBER:
+      case JES_VALUE_BOOLEAN:
+      case JES_VALUE_NULL:
+        dst = (uint8_t*)memcpy(dst, iter->data.start, iter->data.size) + iter->data.size;
+        break;
+      case JES_ARRAY:
+        dst = (uint8_t*)memcpy(dst, "[ \n", sizeof("[ \n") - 1) + (sizeof("[ \n") - 1);
+        break;
+      default:
+      case JES_NONE:
+        printf("\n Serialize error! Node of unexpected type: %d", iter->data.type);
+        return -1;
+    }
+
+    if (HAS_CHILD(iter)) {
+      iter = jes_get_child_node(ctx->pacx, iter);
+      continue;
+    }
+
+    if (HAS_RIGHT(iter)) {
+      iter = jes_get_right_node(ctx->pacx, iter);
+      *dst++ = ',';
+      *dst++ = '\n';
+      continue;
+    }
+
+    while (iter = jes_get_parent_node(ctx->pacx, iter)) {
+      if (HAS_RIGHT(iter)) {
+        iter = jes_get_right_node(ctx->pacx, iter);
+        *dst++ = ',';
+        *dst++ = '\n';
+        break;
+      }
+
+    }
+      *dst++ = '}';
+  }
+  *dst = '\0';
+  return result;
 }
 
 struct jes_node jes_get_root(struct jes_context *ctx)
@@ -836,16 +902,16 @@ void jes_print(struct jes_context *ctx)
 
   while (node) {
 
-    if (node->data.type == JES_NODE_NONE) {
-      printf("\nEND! reached a JES_NODE_NONE");
+    if (node->data.type == JES_NONE) {
+      printf("\nEND! reached a JES_NONE");
       break;
     }
 
-    if (node->data.type == JES_NODE_OBJECT) {
+    if (node->data.type == JES_OBJECT) {
       printf("\n    { <%s> - @%d", jes_node_type_str[node->data.type]);
-    } else if (node->data.type == JES_NODE_KEY) {
+    } else if (node->data.type == JES_KEY) {
       printf("\n        %.*s <%s>: - @%d", node->data.size, node->data.start, jes_node_type_str[node->data.type]);
-    } else if (node->data.type == JES_NODE_ARRAY) {
+    } else if (node->data.type == JES_ARRAY) {
       //printf("\n            %.*s <%s>", node.size, &ctx->json_data[node.offset], jes_node_type_str[node.type]);
     } else {
       printf("\n            %.*s <%s> - @%d", node->data.size, node->data.start, jes_node_type_str[node->data.type]);
@@ -876,7 +942,7 @@ int main(void)
   FILE *fp;
   char file_data[0x4FFFF];
   uint8_t mem_pool[0x4FFFF];
-
+  uint8_t output[0x4FFFF];
   printf("\nSize of jes_tree_node: %d bytes", sizeof(struct jes_tree_node));
   printf("\nSize of jes_token: %d bytes", sizeof(struct jes_token));
   printf("\nSize of jes_parser_context: %d bytes", sizeof(struct jes_parser_context));
@@ -898,7 +964,9 @@ int main(void)
     printf("\nMemory required: %d bytes for %d elements.", ctx->node_count*sizeof(struct jes_tree_node), ctx->node_count);
 
     jes_print(ctx);
-    //jes_delete_node(ctx->pacx, ctx->pacx->root);
+    jes_serialize(ctx, output, sizeof(output));
+    printf("\n\n%s", output);
+    printf("\n\n\n %s", file_data);
   }
   else {
     printf("\nFAILED");

@@ -3,7 +3,7 @@
 
 #define FOR_EACH()
 
-struct jes_parser_context;
+struct jes_parser_context; /* Forward declaration */
 
 struct jes_context {
   uint32_t error;
@@ -29,8 +29,8 @@ struct jes_node {
   uint8_t  *start;
 };
 
-struct jes_context* jes_parse(char *json_data, uint32_t size,
-                              void *mem_pool, uint32_t pool_size);
+struct jes_context* jes_init_context(void *mem_pool, uint32_t pool_size);
+int jes_parse(struct jes_context* ctx, char *json_data, uint32_t size);
 
 struct jes_node jes_get_key(struct jes_context *ctx, char *name);
 void jes_reset_iterator(struct jes_context *ctx);

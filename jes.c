@@ -330,7 +330,7 @@ static struct jes_token jes_get_token(struct jes_parser_context *pacx)
 
   while (true) {
 
-    if (++pacx->offset >= pacx->pool_size) {
+    if (++pacx->offset >= pacx->json_size) {
       /* End of buffer.
          If there is a token in process, mark it as invalid. */
       if (token.type) {
@@ -340,9 +340,8 @@ static struct jes_token jes_get_token(struct jes_parser_context *pacx)
     }
 
     char ch = pacx->json_data[pacx->offset];
-    //printf("\n-->\"%c\"(%d)<--@%d", ch, ch, pacx->offset);
-    if (!token.type) {
 
+    if (!token.type) {
       /* Reaching the end of the string. Deliver the last type detected. */
       if (ch == '\0') {
         token.offset = pacx->offset;
@@ -655,27 +654,7 @@ static bool jes_expect(struct jes_parser_context *pacx,
   return false;
 }
 
-static void jes_init_parser(struct jes_parser_context *pacx,
-                            char *json_data, uint32_t json_size,
-                            void *mem_pool, uint32_t pool_size)
-{
-  pacx->json_data = json_data;
-  pacx->json_size = json_size;
-  pacx->offset = -1;
-
-  pacx->pool = mem_pool;
-  pacx->pool_size = pool_size;
-  pacx->capacity = pool_size / sizeof(struct jes_tree_node);
-  printf("\nallocator capacity is %d nodes", pacx->capacity);
-  pacx->allocated = 0;
-  pacx->index = 0;
-  pacx->iter = NULL;
-  pacx->root = NULL;
-  pacx->state = JES_STATE_START;
-}
-
-struct jes_context* jes_parse(char *json_data, uint32_t size,
-                              void *mem_pool, uint32_t pool_size)
+struct jes_context* jes_init_context(void *mem_pool, uint32_t pool_size)
 {
   if (pool_size < (sizeof(struct jes_context) +
                    sizeof(struct jes_parser_context))) {
@@ -687,9 +666,30 @@ struct jes_context* jes_parse(char *json_data, uint32_t size,
   ctx->pacx = pacx;
   ctx->error = 0;
   ctx->node_count = 0;
-  jes_init_parser(pacx, json_data, size, pacx + 1,
-    pool_size - sizeof(struct jes_context) - sizeof(struct jes_parser_context));
 
+  pacx->json_data = NULL;
+  pacx->json_size = 0;
+  pacx->offset = -1;
+
+  pacx->pool = (struct jes_tree_node*)(pacx + 1);
+  pacx->pool_size = pool_size - sizeof(struct jes_context) - sizeof(struct jes_parser_context);
+  pacx->capacity = pacx->pool_size / sizeof(struct jes_tree_node);
+  printf("\nallocator capacity is %d nodes", pacx->capacity);
+  pacx->allocated = 0;
+  pacx->index = 0;
+  pacx->iter = NULL;
+  pacx->root = NULL;
+  pacx->state = JES_STATE_START;
+  printf("\n offset=%d", pacx->offset);
+  return ctx;
+}
+
+int jes_parse(struct jes_context *ctx, char *json_data, uint32_t size)
+{
+  int result = 0;
+  struct jes_parser_context *pacx = ctx->pacx;
+  pacx->json_data = json_data;
+  pacx->json_size = size;
   /* Fetch the first token to before entering the state machine. */
   pacx->token = jes_get_token(pacx);
 
@@ -783,7 +783,7 @@ struct jes_context* jes_parse(char *json_data, uint32_t size,
   }
 
   ctx->node_count = pacx->allocated;
-  return ctx;
+  return result;
 }
 
 int jes_serialize(struct jes_context *ctx, uint8_t *buffer, uint32_t len)
@@ -841,8 +841,8 @@ int jes_serialize(struct jes_context *ctx, uint8_t *buffer, uint32_t len)
         *dst++ = '\n';
         break;
       }
-
     }
+
       *dst++ = '}';
   }
   *dst = '\0';
@@ -943,9 +943,11 @@ int main(void)
   char file_data[0x4FFFF];
   uint8_t mem_pool[0x4FFFF];
   uint8_t output[0x4FFFF];
-  printf("\nSize of jes_tree_node: %d bytes", sizeof(struct jes_tree_node));
-  printf("\nSize of jes_token: %d bytes", sizeof(struct jes_token));
+
+  printf("\nSize of jes_context: %d bytes", sizeof(struct jes_context));
   printf("\nSize of jes_parser_context: %d bytes", sizeof(struct jes_parser_context));
+  printf("\nSize of jes_tree_node: %d bytes", sizeof(struct jes_tree_node));
+
 
   fp = fopen("test1.json", "rb");
 
@@ -957,16 +959,21 @@ int main(void)
     }
     fclose(fp);
   }
+  //printf("\n\n\n %s", file_data);
+  ctx = jes_init_context(mem_pool, sizeof(mem_pool));
+  printf("0x%lX, 0x%lX", mem_pool, ctx);
+  if (!ctx) {
+    printf("\n Context init failed!");
+  }
 
-  ctx = jes_parse(file_data, sizeof(file_data), mem_pool, sizeof(mem_pool));
-  if (ctx) {
+  if (0 == jes_parse(ctx, file_data, sizeof(file_data))) {
     printf("\nSize of JSON data: %d bytes", strnlen(file_data, sizeof(file_data)));
     printf("\nMemory required: %d bytes for %d elements.", ctx->node_count*sizeof(struct jes_tree_node), ctx->node_count);
 
     jes_print(ctx);
     jes_serialize(ctx, output, sizeof(output));
     printf("\n\n%s", output);
-    printf("\n\n\n %s", file_data);
+    //printf("\n\n\n %s", file_data);
   }
   else {
     printf("\nFAILED");

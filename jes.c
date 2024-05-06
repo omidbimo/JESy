@@ -93,12 +93,12 @@ enum jes_parser_state {
 
 typedef int16_t jes_node_descriptor;
 
-struct jes_tree_node {
-  struct jes_node data;
+struct jes_node {
   jes_node_descriptor parent;
   jes_node_descriptor left;
   jes_node_descriptor right;
   jes_node_descriptor child;
+  struct jes_json_element data;
 };
 
 struct jes_tree_free_node {
@@ -115,20 +115,26 @@ struct jes_parser_context {
   uint8_t   *json_data;
   uint32_t  json_size;
   int32_t   offset;
-  uint32_t  pool_size;
+
   uint16_t  capacity;
   uint16_t  allocated;
   int16_t   index;
+
   enum jes_parser_state state;
+  uint32_t  pool_size;
+  void      *node_pool;
+
   struct jes_token token;
-  struct jes_tree_node *iter;
-  struct jes_tree_node *root;
-  struct jes_tree_node *pool;
+
+  struct jes_node *iter;
+  struct jes_node *root;
+  struct jes_node *pool;
+
   struct jes_tree_free_node *free;
 };
 
-static struct jes_tree_node *jes_find_duplicated_key(struct jes_parser_context *pacx,
-              struct jes_tree_node *object_node, struct jes_token *key_token);
+static struct jes_node *jes_find_duplicated_key(struct jes_parser_context *pacx,
+              struct jes_node *object_node, struct jes_token *key_token);
 
 static void jes_log(struct jes_parser_context *ctx, const struct jes_token *token)
 {
@@ -137,14 +143,14 @@ static void jes_log(struct jes_parser_context *ctx, const struct jes_token *toke
           token->size, &ctx->json_data[token->offset]);
 }
 
-static struct jes_tree_node* jes_allocate(struct jes_parser_context *pacx)
+static struct jes_node* jes_allocate(struct jes_parser_context *pacx)
 {
-  struct jes_tree_node *new_node = NULL;
+  struct jes_node *new_node = NULL;
 
   if (pacx->allocated < pacx->capacity) {
     if (pacx->free) {
       /* Pop the first node from free list */
-      new_node = (struct jes_tree_node*)pacx->free;
+      new_node = (struct jes_node*)pacx->free;
       pacx->free = pacx->free->next;
     }
     else {
@@ -163,7 +169,7 @@ static struct jes_tree_node* jes_allocate(struct jes_parser_context *pacx)
   return new_node;
 }
 
-static void jes_free(struct jes_parser_context *pacx, struct jes_tree_node *node)
+static void jes_free(struct jes_parser_context *pacx, struct jes_node *node)
 {
   struct jes_tree_free_node *free_node = (struct jes_tree_free_node*)node;
 
@@ -182,8 +188,8 @@ static void jes_free(struct jes_parser_context *pacx, struct jes_tree_node *node
   }
 }
 
-static struct jes_tree_node* jes_get_parent_node(struct jes_parser_context *pacx,
-                                                 struct jes_tree_node *node)
+static struct jes_node* jes_get_parent_node(struct jes_parser_context *pacx,
+                                                 struct jes_node *node)
 {
   /* TODO: add checking */
   if (node && (HAS_PARENT(node))) {
@@ -193,11 +199,11 @@ static struct jes_tree_node* jes_get_parent_node(struct jes_parser_context *pacx
   return NULL;
 }
 
-static struct jes_tree_node* jes_get_parent_node_bytype(struct jes_parser_context *pacx,
-                                                        struct jes_tree_node *node,
+static struct jes_node* jes_get_parent_node_bytype(struct jes_parser_context *pacx,
+                                                        struct jes_node *node,
                                                         enum jes_node_type type)
 {
-  struct jes_tree_node *parent = NULL;
+  struct jes_node *parent = NULL;
   /* TODO: add checkings */
   while (node && HAS_PARENT(node)) {
     node = &pacx->pool[node->parent];
@@ -210,8 +216,8 @@ static struct jes_tree_node* jes_get_parent_node_bytype(struct jes_parser_contex
   return parent;
 }
 
-static struct jes_tree_node* jes_get_child_node(struct jes_parser_context *pacx,
-                                                struct jes_tree_node *node)
+static struct jes_node* jes_get_child_node(struct jes_parser_context *pacx,
+                                                struct jes_node *node)
 {
   /* TODO: add checkings */
   if (node && HAS_CHILD(node)) {
@@ -221,8 +227,8 @@ static struct jes_tree_node* jes_get_child_node(struct jes_parser_context *pacx,
   return NULL;
 }
 
-static struct jes_tree_node* jes_get_right_node(struct jes_parser_context *pacx,
-                                                struct jes_tree_node *node)
+static struct jes_node* jes_get_right_node(struct jes_parser_context *pacx,
+                                                struct jes_node *node)
 {
   /* TODO: add checkings */
   if (node && HAS_RIGHT(node)) {
@@ -232,8 +238,8 @@ static struct jes_tree_node* jes_get_right_node(struct jes_parser_context *pacx,
   return NULL;
 }
 
-static struct jes_tree_node* jes_get_left_node(struct jes_parser_context *pacx,
-                                               struct jes_tree_node *node)
+static struct jes_node* jes_get_left_node(struct jes_parser_context *pacx,
+                                               struct jes_node *node)
 {
   /* TODO: add checkings */
   if (node && HAS_LEFT(node)) {
@@ -244,7 +250,7 @@ static struct jes_tree_node* jes_get_left_node(struct jes_parser_context *pacx,
 }
 
 static enum jes_node_type jes_get_parent_type(struct jes_parser_context *pacx,
-                                              struct jes_tree_node *node)
+                                              struct jes_node *node)
 {
   if (node) {
     return pacx->pool[node->parent].data.type;
@@ -252,23 +258,23 @@ static enum jes_node_type jes_get_parent_type(struct jes_parser_context *pacx,
   return JES_NONE;
 }
 
-static struct jes_tree_node* jes_add_node(struct jes_parser_context *pacx,
-                                          struct jes_tree_node *node,
+static struct jes_node* jes_add_node(struct jes_parser_context *pacx,
+                                          struct jes_node *node,
                                           uint16_t type,
                                           uint32_t offset,
-                                          uint16_t size)
+                                          uint16_t length)
 {
-  struct jes_tree_node *new_node = jes_allocate(pacx);
+  struct jes_node *new_node = jes_allocate(pacx);
 
   if (new_node) {
     new_node->data.type = type;
-    new_node->data.size = size;
-    new_node->data.start = &pacx->json_data[offset];
+    new_node->data.length = length;
+    new_node->data.value = &pacx->json_data[offset];
     if (node) {
       new_node->parent = node - pacx->pool; /* node's index */
 
       if (HAS_CHILD(node)) {
-        struct jes_tree_node *child = &pacx->pool[node->child];
+        struct jes_node *child = &pacx->pool[node->child];
         while (HAS_RIGHT(child)) {
           child = &pacx->pool[child->right];
         }
@@ -288,11 +294,11 @@ static struct jes_tree_node* jes_add_node(struct jes_parser_context *pacx,
   return new_node;
 }
 
-static void jes_delete_node(struct jes_parser_context *pacx, struct jes_tree_node *node)
+static void jes_delete_node(struct jes_parser_context *pacx, struct jes_node *node)
 {
-  struct jes_tree_node *iter = jes_get_child_node(pacx, node);
-  struct jes_tree_node *parent = NULL;
-  struct jes_tree_node *prev = NULL;
+  struct jes_node *iter = jes_get_child_node(pacx, node);
+  struct jes_node *parent = NULL;
+  struct jes_node *prev = NULL;
 
   do {
     iter = node;
@@ -533,26 +539,26 @@ static struct jes_token jes_get_token(struct jes_parser_context *pacx)
   return token;
 }
 
-static struct jes_tree_node *jes_find_duplicated_key(struct jes_parser_context *pacx,
-              struct jes_tree_node *object_node, struct jes_token *key_token)
+static struct jes_node *jes_find_duplicated_key(struct jes_parser_context *pacx,
+              struct jes_node *object_node, struct jes_token *key_token)
 {
-  struct jes_tree_node *duplicated = NULL;
+  struct jes_node *duplicated = NULL;
 
   if (object_node->data.type == JES_OBJECT)
   {
-    struct jes_tree_node *iter = object_node;
+    struct jes_node *iter = object_node;
     if (HAS_CHILD(iter)) {
       iter = jes_get_child_node(pacx, iter);
       assert(iter->data.type == JES_KEY);
-      if ((iter->data.size == key_token->size) &&
-          (memcmp(iter->data.start, &pacx->json_data[key_token->offset], key_token->size) == 0)) {
+      if ((iter->data.length == key_token->size) &&
+          (memcmp(iter->data.value, &pacx->json_data[key_token->offset], key_token->size) == 0)) {
         duplicated = iter;
       }
       else {
         while (HAS_RIGHT(iter)) {
           iter = jes_get_right_node(pacx, iter);
-          if ((iter->data.size == key_token->size) &&
-              (memcmp(iter->data.start, &pacx->json_data[key_token->offset], key_token->size) == 0)) {
+          if ((iter->data.length == key_token->size) &&
+              (memcmp(iter->data.value, &pacx->json_data[key_token->offset], key_token->size) == 0)) {
             duplicated = iter;
           }
         }
@@ -572,7 +578,7 @@ static bool jes_accept(struct jes_parser_context *pacx,
       case JES_KEY:            /* Fall through intended. */
       {
         /* If there is already a key with the same name, we'll overwrite it. */
-        struct jes_tree_node *node = jes_find_duplicated_key(pacx, pacx->iter, &pacx->token);
+        struct jes_node *node = jes_find_duplicated_key(pacx, pacx->iter, &pacx->token);
         if (node) {
           jes_delete_node(pacx, jes_get_child_node(pacx, node));
           pacx->iter = node;
@@ -671,9 +677,9 @@ struct jes_context* jes_init_context(void *mem_pool, uint32_t pool_size)
   pacx->json_size = 0;
   pacx->offset = -1;
 
-  pacx->pool = (struct jes_tree_node*)(pacx + 1);
+  pacx->pool = (struct jes_node*)(pacx + 1);
   pacx->pool_size = pool_size - sizeof(struct jes_context) - sizeof(struct jes_parser_context);
-  pacx->capacity = pacx->pool_size / sizeof(struct jes_tree_node);
+  pacx->capacity = pacx->pool_size / sizeof(struct jes_node);
   printf("\nallocator capacity is %d nodes", pacx->capacity);
   pacx->allocated = 0;
   pacx->index = 0;
@@ -681,15 +687,16 @@ struct jes_context* jes_init_context(void *mem_pool, uint32_t pool_size)
   pacx->root = NULL;
   pacx->state = JES_STATE_START;
   printf("\n offset=%d", pacx->offset);
+
   return ctx;
 }
 
-int jes_parse(struct jes_context *ctx, char *json_data, uint32_t size)
+int jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_length)
 {
   int result = 0;
   struct jes_parser_context *pacx = ctx->pacx;
   pacx->json_data = json_data;
-  pacx->json_size = size;
+  pacx->json_size = json_length;
   /* Fetch the first token to before entering the state machine. */
   pacx->token = jes_get_token(pacx);
 
@@ -783,38 +790,39 @@ int jes_parse(struct jes_context *ctx, char *json_data, uint32_t size)
   }
 
   ctx->node_count = pacx->allocated;
+  ctx->required_mem = pacx->allocated * sizeof(struct jes_node);
   return result;
 }
 
-int jes_serialize(struct jes_context *ctx, uint8_t *buffer, uint32_t len)
+int jes_serialize(struct jes_context *ctx, uint8_t *buffer, uint32_t lenngth)
 {
-  struct jes_tree_node *iter = ctx->pacx->root;
+  struct jes_node *iter = ctx->pacx->root;
   uint8_t *dst = buffer;
   int result = 0;
+
   while (iter) {
     switch (iter->data.type) {
       case JES_OBJECT:
-        dst = (uint8_t*)memcpy(dst, "{ \n", sizeof("{ \n") - 1) + (sizeof("{ \n") - 1);
+        *dst++ = '{';
         break;
       case JES_KEY:
         *dst++ = '"';
-        dst = (uint8_t*)memcpy(dst, iter->data.start, iter->data.size) + iter->data.size;
+        dst = (uint8_t*)memcpy(dst, iter->data.value, iter->data.length) + iter->data.length;
         *dst++ = '"';
         *dst++ = ':';
-        *dst++ = ' ';
         break;
       case JES_VALUE_STRING:
         *dst++ = '"';
-        dst = (uint8_t*)memcpy(dst, iter->data.start, iter->data.size) + iter->data.size;
+        dst = (uint8_t*)memcpy(dst, iter->data.value, iter->data.length) + iter->data.length;
         *dst++ = '"';
         break;
       case JES_VALUE_NUMBER:
       case JES_VALUE_BOOLEAN:
       case JES_VALUE_NULL:
-        dst = (uint8_t*)memcpy(dst, iter->data.start, iter->data.size) + iter->data.size;
+        dst = (uint8_t*)memcpy(dst, iter->data.value, iter->data.length) + iter->data.length;
         break;
       case JES_ARRAY:
-        dst = (uint8_t*)memcpy(dst, "[ \n", sizeof("[ \n") - 1) + (sizeof("[ \n") - 1);
+        *dst++ = '[';
         break;
       default:
       case JES_NONE:
@@ -830,59 +838,61 @@ int jes_serialize(struct jes_context *ctx, uint8_t *buffer, uint32_t len)
     if (HAS_RIGHT(iter)) {
       iter = jes_get_right_node(ctx->pacx, iter);
       *dst++ = ',';
-      *dst++ = '\n';
       continue;
     }
 
     while (iter = jes_get_parent_node(ctx->pacx, iter)) {
+      if (iter->data.type == JES_OBJECT) {
+        *dst++ = '}';
+      }
+      else if (iter->data.type == JES_ARRAY) {
+        *dst++ = ']';
+      }
       if (HAS_RIGHT(iter)) {
         iter = jes_get_right_node(ctx->pacx, iter);
         *dst++ = ',';
-        *dst++ = '\n';
         break;
       }
     }
-
-      *dst++ = '}';
   }
   *dst = '\0';
   return result;
 }
 
-struct jes_node jes_get_root(struct jes_context *ctx)
+struct jes_json_element jes_get_root(struct jes_context *ctx)
 {
   if (ctx) {
     ctx->pacx->iter = ctx->pacx->root;
     return ctx->pacx->iter->data;
   }
-  return (struct jes_node){ 0 };
+  return (struct jes_json_element){ 0 };
 }
 
-struct jes_node jes_get_parent(struct jes_context *ctx)
+struct jes_json_element jes_get_parent(struct jes_context *ctx)
 {
   if ((ctx) && HAS_PARENT(ctx->pacx->iter)) {
     ctx->pacx->iter = &ctx->pacx->pool[ctx->pacx->iter->parent];
     return ctx->pacx->iter->data;
   }
-  return (struct jes_node){ 0 };
+  return (struct jes_json_element){ 0 };
 }
 
-struct jes_node jes_get_child(struct jes_context *ctx)
+struct jes_json_element jes_get_child(struct jes_context *ctx)
 {
   if ((ctx) && HAS_CHILD(ctx->pacx->iter)) {
     ctx->pacx->iter = &ctx->pacx->pool[ctx->pacx->iter->child];
     return ctx->pacx->iter->data;
   }
-  return (struct jes_node){ 0 };
+  return (struct jes_json_element){ 0 };
 }
 
-struct jes_node jes_get_next(struct jes_context *ctx)
+struct jes_json_element jes_get_next(struct jes_context *ctx)
 {
   if ((ctx) && HAS_RIGHT(ctx->pacx->iter)) {
     ctx->pacx->iter = &ctx->pacx->pool[ctx->pacx->iter->right];
     return ctx->pacx->iter->data;
   }
-  return (struct jes_node){ 0 };
+  return (struct jes_json_element){ 0 };
 }
 
 void jes_reset_iterator(struct jes_context *ctx)
@@ -892,7 +902,7 @@ void jes_reset_iterator(struct jes_context *ctx)
 
 void jes_print(struct jes_context *ctx)
 {
-  struct jes_tree_node *node = ctx->pacx->root;
+  struct jes_node *node = ctx->pacx->root;
   if (!ctx->pacx->root) return;
   uint32_t idx;
   for (idx = 0; idx < ctx->pacx->allocated; idx++) {
@@ -910,11 +920,11 @@ void jes_print(struct jes_context *ctx)
     if (node->data.type == JES_OBJECT) {
       printf("\n    { <%s> - @%d", jes_node_type_str[node->data.type]);
     } else if (node->data.type == JES_KEY) {
-      printf("\n        %.*s <%s>: - @%d", node->data.size, node->data.start, jes_node_type_str[node->data.type]);
+      printf("\n        %.*s <%s>: - @%d", node->data.length, node->data.value, jes_node_type_str[node->data.type]);
     } else if (node->data.type == JES_ARRAY) {
       //printf("\n            %.*s <%s>", node.size, &ctx->json_data[node.offset], jes_node_type_str[node.type]);
     } else {
-      printf("\n            %.*s <%s> - @%d", node->data.size, node->data.start, jes_node_type_str[node->data.type]);
+      printf("\n            %.*s <%s> - @%d", node->data.length, node->data.value, jes_node_type_str[node->data.type]);
     }
 
     if (HAS_CHILD(node)) {
@@ -946,7 +956,7 @@ int main(void)
 
   printf("\nSize of jes_context: %d bytes", sizeof(struct jes_context));
   printf("\nSize of jes_parser_context: %d bytes", sizeof(struct jes_parser_context));
-  printf("\nSize of jes_tree_node: %d bytes", sizeof(struct jes_tree_node));
+  printf("\nSize of jes_node: %d bytes", sizeof(struct jes_node));
 
 
   fp = fopen("test1.json", "rb");
@@ -961,18 +971,19 @@ int main(void)
   }
   //printf("\n\n\n %s", file_data);
   ctx = jes_init_context(mem_pool, sizeof(mem_pool));
-  printf("0x%lX, 0x%lX", mem_pool, ctx);
+  //printf("0x%lX, 0x%lX", mem_pool, ctx);
   if (!ctx) {
     printf("\n Context init failed!");
   }
 
   if (0 == jes_parse(ctx, file_data, sizeof(file_data))) {
     printf("\nSize of JSON data: %d bytes", strnlen(file_data, sizeof(file_data)));
-    printf("\nMemory required: %d bytes for %d elements.", ctx->node_count*sizeof(struct jes_tree_node), ctx->node_count);
+    printf("\nMemory required: %d bytes for %d elements.", ctx->node_count*sizeof(struct jes_node), ctx->node_count);
 
     jes_print(ctx);
     jes_serialize(ctx, output, sizeof(output));
     printf("\n\n%s", output);
+    printf("\nJSON length: %d", strlen(output));
     //printf("\n\n\n %s", file_data);
   }
   else {

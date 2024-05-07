@@ -462,14 +462,6 @@ static struct jes_token jes_get_token(struct jes_parser_context *pacx)
       if (ch == '\"') {
         break;
       }
-
-      if (ch == '\\') {
-        if (LOOK_AHEAD(pacx) != 'n') {
-          token.type = JES_TOKEN_INVALID;
-          break;
-        }
-      }
-
       token.size++;
       continue;
     }

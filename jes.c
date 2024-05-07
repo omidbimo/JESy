@@ -65,7 +65,7 @@ static char jes_state_str[][20] = {
   "STATE_WANT_KEY",
   "STATE_WANT_VALUE",
   "STATE_WANT_ARRAY",
-  "STATE_COMPOSITE_END",
+  "STATE_STRUCTURE_END",
 };
 enum jes_token_type {
   JES_TOKEN_EOF = 0,
@@ -735,7 +735,7 @@ int jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_length)
         break;
 
       /* A Structure can be an Object or an Array.
-         When a composite is closed, another closing symbol is allowed.
+         When a structure is closed, another closing symbol is allowed.
          Otherwise, only a separator is acceptable. */
       case JES_STATE_STRUCTURE_END:
         if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE, JES_STATE_STRUCTURE_END) ||

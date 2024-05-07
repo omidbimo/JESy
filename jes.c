@@ -34,19 +34,19 @@
 
 
 static char jes_token_type_str[][20] = {
-  "EOF          ",
+  "EOF             ",
   "OPENING_BRACKET ",
-  "CLOSING_BRACKET",
+  "CLOSING_BRACKET ",
   "OPENING_BRACE   ",
-  "CLOSING_BRACE  ",
-  "STRING       ",
-  "NUMBER       ",
-  "BOOLEAN      ",
-  "NULL         ",
-  "COLON        ",
-  "COMMA        ",
-  "ESC          ",
-  "INVALID      ",
+  "CLOSING_BRACE   ",
+  "STRING          ",
+  "NUMBER          ",
+  "BOOLEAN         ",
+  "NULL            ",
+  "COLON           ",
+  "COMMA           ",
+  "ESC             ",
+  "INVALID         ",
 };
 
 static char jes_node_type_str[][20] = {
@@ -88,7 +88,7 @@ enum jes_parser_state {
   JES_STATE_WANT_KEY,
   JES_STATE_WANT_VALUE,
   JES_STATE_WANT_ARRAY,
-  JES_STATE_COMPOSITE_END,
+  JES_STATE_STRUCTURE_END,
 };
 
 typedef int16_t jes_node_descriptor;
@@ -208,6 +208,22 @@ static struct jes_node* jes_get_parent_node_bytype(struct jes_parser_context *pa
   while (node && HAS_PARENT(node)) {
     node = &pacx->pool[node->parent];
     if (node->data.type == type) {
+      parent = node;
+      break;
+    }
+  }
+
+  return parent;
+}
+
+static struct jes_node* jes_get_structure_parent_node(struct jes_parser_context *pacx,
+                                                      struct jes_node *node)
+{
+  struct jes_node *parent = NULL;
+  /* TODO: add checkings */
+  while (node && HAS_PARENT(node)) {
+    node = &pacx->pool[node->parent];
+    if ((node->data.type == JES_OBJECT) || (node->data.type == JES_ARRAY)) {
       parent = node;
       break;
     }
@@ -574,6 +590,10 @@ static bool jes_accept(struct jes_parser_context *pacx,
                        enum jes_parser_state state)
 {
   if (pacx->token.type == token_type) {
+#if 0
+    if (pacx->iter)
+    printf("\n - [%d] %s, parent:[%d], right:%d, child:%d", pacx->iter - pacx->pool, jes_node_type_str[pacx->iter->data.type], pacx->iter->parent, pacx->iter->right, pacx->iter->child);
+#endif
     switch (node_type) {
       case JES_KEY:            /* Fall through intended. */
       {
@@ -596,10 +616,6 @@ static bool jes_accept(struct jes_parser_context *pacx,
           printf("\nJES Error! Allocation failed.");
           return false;
         }
-
-#ifdef LOG
-        printf("\n    JES::Node: %s, %s >>> %s", jes_node_type_str[node_type], jes_state_str[pacx->state], jes_state_str[state]);
-#endif
         break;
 
       case JES_NONE:
@@ -612,33 +628,33 @@ static bool jes_accept(struct jes_parser_context *pacx,
                  otherwise, go back to the parent object.
         */
         if (token_type == JES_TOKEN_CLOSING_BRACE) {
-          pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_OBJECT);
+          /* End of an empty Array. No upward move to the parent node. */
+          if ((pacx->iter->data.type == JES_ARRAY) && (!HAS_CHILD(pacx->iter))) {
+            break;
+          }
+          pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_ARRAY);
         }
         else if (token_type == JES_TOKEN_CLOSING_BRACKET) {
-          if (pacx->iter->data.type != JES_OBJECT) {
-            pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_OBJECT);
+          /* End of an empty Object. No upward move to the parent node. */
+          if ((pacx->iter->data.type == JES_OBJECT) && (!HAS_CHILD(pacx->iter))) {
+            break;
           }
           pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_OBJECT);
         }
-        else if ((token_type == JES_TOKEN_COMMA) &&
-                 (pacx->iter->data.type == JES_VALUE_STRING  ||
-                  pacx->iter->data.type == JES_VALUE_NUMBER  ||
-                  pacx->iter->data.type == JES_VALUE_BOOLEAN ||
-                  pacx->iter->data.type == JES_VALUE_NULL)) {
-          if (jes_get_parent_type(pacx, pacx->iter) == JES_ARRAY) {
-            pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_ARRAY);
-          }
-          else {
-            pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_OBJECT);
-          }
+        else if (token_type == JES_TOKEN_COMMA) {
+          pacx->iter = jes_get_structure_parent_node(pacx, pacx->iter);
         }
 
+        assert(pacx->iter);
         break;
       default:
 
         break;
     }
-
+#if 0
+    if (pacx->iter)
+    printf("\n - [%d] %s, parent:[%d], right:%d, child:%d\n", pacx->iter - pacx->pool, jes_node_type_str[pacx->iter->data.type], pacx->iter->parent, pacx->iter->right, pacx->iter->child);
+#endif
     pacx->state = state;
     pacx->token = jes_get_token(pacx);
     return true;
@@ -714,7 +730,7 @@ int jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_length)
       /* An opening parenthesis has already been found.
          A closing bracket is allowed. Otherwise, only a KEY is acceptable. */
       case JES_STATE_WANT_KEY:
-        if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE, JES_STATE_COMPOSITE_END)) {
+        if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE, JES_STATE_STRUCTURE_END)) {
           continue;
         }
 
@@ -726,12 +742,12 @@ int jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_length)
         ctx->error = -1;
         break;
 
-      /* A composites can be an Object, an Array or a Key/value pair.
+      /* A Structure can be an Object or an Array.
          When a composite is closed, another closing symbol is allowed.
          Otherwise, only a separator is acceptable. */
-      case JES_STATE_COMPOSITE_END:
-        if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE, JES_STATE_COMPOSITE_END) ||
-            jes_accept(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE, JES_STATE_COMPOSITE_END)) {
+      case JES_STATE_STRUCTURE_END:
+        if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE, JES_STATE_STRUCTURE_END) ||
+            jes_accept(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE, JES_STATE_STRUCTURE_END)) {
           continue;
         }
 
@@ -750,10 +766,10 @@ int jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_length)
           continue;
         }
 
-        if (jes_accept(pacx, JES_TOKEN_STRING, JES_VALUE_STRING, JES_STATE_COMPOSITE_END) ||
-            jes_accept(pacx, JES_TOKEN_NUMBER, JES_VALUE_NUMBER, JES_STATE_COMPOSITE_END)   ||
-            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_VALUE_BOOLEAN, JES_STATE_COMPOSITE_END) ||
-            jes_accept(pacx, JES_TOKEN_NULL, JES_VALUE_NULL, JES_STATE_COMPOSITE_END)) {
+        if (jes_accept(pacx, JES_TOKEN_STRING, JES_VALUE_STRING, JES_STATE_STRUCTURE_END) ||
+            jes_accept(pacx, JES_TOKEN_NUMBER, JES_VALUE_NUMBER, JES_STATE_STRUCTURE_END)   ||
+            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_VALUE_BOOLEAN, JES_STATE_STRUCTURE_END) ||
+            jes_accept(pacx, JES_TOKEN_NULL, JES_VALUE_NULL, JES_STATE_STRUCTURE_END)) {
           continue;
         }
 
@@ -777,7 +793,7 @@ int jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_length)
             continue;
           }
 
-          if (jes_expect(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE, JES_STATE_COMPOSITE_END)) {
+          if (jes_expect(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE, JES_STATE_STRUCTURE_END)) {
             continue;
           }
         }
@@ -835,13 +851,21 @@ int jes_serialize(struct jes_context *ctx, uint8_t *buffer, uint32_t lenngth)
       continue;
     }
 
+    if (iter->data.type == JES_OBJECT) {
+      *dst++ = '}';
+    }
+
+    else if (iter->data.type == JES_ARRAY) {
+      *dst++ = ']';
+    }
+
     if (HAS_RIGHT(iter)) {
       iter = jes_get_right_node(ctx->pacx, iter);
       *dst++ = ',';
       continue;
     }
 
-    while (iter = jes_get_parent_node(ctx->pacx, iter)) {
+     while (iter = jes_get_parent_node(ctx->pacx, iter)) {
       if (iter->data.type == JES_OBJECT) {
         *dst++ = '}';
       }
@@ -857,6 +881,94 @@ int jes_serialize(struct jes_context *ctx, uint8_t *buffer, uint32_t lenngth)
   }
   *dst = '\0';
   return result;
+}
+
+void jes_print_tree(struct jes_context *ctx)
+{
+  struct jes_node *iter = ctx->pacx->root;
+
+  int tabs = 0;
+  int idx;
+      printf("\n");
+  while (iter) {
+    printf("\n ---------->>> [%d] %s,   parent:[%d], right:%d, child:%d\n", iter - ctx->pacx->pool, jes_node_type_str[iter->data.type],
+      iter->parent, iter->right, iter->child);
+    switch (iter->data.type) {
+      case JES_OBJECT:
+        //for (idx = 0; idx < tabs; idx++)
+        //{
+        //  *dst++ = '\t';
+        //}
+
+        printf(" {\n");
+        tabs++;
+        break;
+      case JES_KEY:
+        for (idx = 0; idx < tabs; idx++) printf("\t");
+
+        printf("\"%.*s\":", iter->data.length, iter->data.value);
+        break;
+      case JES_VALUE_STRING:
+        printf(" \"%.*s\"", iter->data.length, iter->data.value);
+        break;
+      case JES_VALUE_NUMBER:
+      case JES_VALUE_BOOLEAN:
+      case JES_VALUE_NULL:
+        printf(" %.*s", iter->data.length, iter->data.value);
+        break;
+      case JES_ARRAY:
+        printf("[\n");
+        break;
+      default:
+      case JES_NONE:
+        printf("\n Serialize error! Node of unexpected type: %d", iter->data.type);
+        return;
+    }
+
+    if (HAS_CHILD(iter)) {
+      iter = jes_get_child_node(ctx->pacx, iter);
+      continue;
+    }
+
+    if (iter->data.type == JES_OBJECT) {
+      printf("\n");
+      for (idx = 0; idx < tabs; idx++) printf("\t");
+      printf("} !!!!\n");
+      tabs--;
+    }
+
+    else if (iter->data.type == JES_ARRAY) {
+      printf("\n");
+      for (idx = 0; idx < tabs; idx++) printf("\t");
+      printf("] ????\n");
+    }
+
+    if (HAS_RIGHT(iter)) {
+      iter = jes_get_right_node(ctx->pacx, iter);
+      printf(",\n");
+      continue;
+    }
+
+     while (iter = jes_get_parent_node(ctx->pacx, iter)) {
+      if (iter->data.type == JES_OBJECT) {
+        printf("\n");
+        for (idx = 0; idx < tabs; idx++) printf("\t");
+        printf("} [%d]", iter - ctx->pacx->pool);
+        tabs--;
+      }
+      else if (iter->data.type == JES_ARRAY) {
+        printf("\n");
+        for (idx = 0; idx < tabs; idx++) printf("\t");
+        printf("]");
+      }
+      if (HAS_RIGHT(iter)) {
+        printf("\nHAS_RIGHT [%d]", iter - ctx->pacx->pool);
+        iter = jes_get_right_node(ctx->pacx, iter);
+        printf(",\n");
+        break;
+      }
+    }
+  }
 }
 
 struct jes_json_element jes_get_root(struct jes_context *ctx)
@@ -906,10 +1018,10 @@ void jes_print(struct jes_context *ctx)
   if (!ctx->pacx->root) return;
   uint32_t idx;
   for (idx = 0; idx < ctx->pacx->allocated; idx++) {
-    printf("\n    %d. %s,   parent:%d, next:%d, child:%d", idx, jes_node_type_str[ctx->pacx->pool[idx].data.type],
+    printf("\n    %d. %s,   parent:%d, right:%d, child:%d", idx, jes_node_type_str[ctx->pacx->pool[idx].data.type],
       ctx->pacx->pool[idx].parent, ctx->pacx->pool[idx].right, ctx->pacx->pool[idx].child);
   }
-
+  return;
   while (node) {
 
     if (node->data.type == JES_NONE) {
@@ -983,8 +1095,9 @@ int main(void)
     jes_print(ctx);
     jes_serialize(ctx, output, sizeof(output));
     printf("\n\n%s", output);
+
+    //jes_print_tree(ctx);
     printf("\nJSON length: %d", strlen(output));
-    //printf("\n\n\n %s", file_data);
   }
   else {
     printf("\nFAILED");

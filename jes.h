@@ -4,12 +4,13 @@
 #define FOR_EACH()
 
 struct jes_parser_context; /* Forward declaration */
+typedef uint32_t jes_status;
 
 struct jes_context {
-  uint32_t error;
-  uint32_t node_count;
-  uint32_t required_mem;
-  uint32_t dump_size;
+  jes_status  status;
+  uint32_t    node_count;
+  uint32_t    required_mem;
+  uint32_t    dump_size;
   struct jes_parser_context *pacx;
 };
 
@@ -27,11 +28,12 @@ enum jes_node_type {
 struct jes_json_element {
   uint16_t type; /* of type enum jes_node_type */
   uint16_t length;
-  uint8_t  *value;
+  char    *value;
 };
 
 struct jes_context* jes_init_context(void *mem_pool, uint32_t pool_size);
-int jes_parse(struct jes_context* ctx, char *json_data, uint32_t json_length);
+jes_status jes_parse(struct jes_context* ctx, char *json_data, uint32_t json_length);
+jes_status jes_serialize(struct jes_context *ctx, char *json_data, uint32_t length);
 
 struct jes_json_element jes_get_key(struct jes_context *ctx, char *name);
 void jes_reset_iterator(struct jes_context *ctx);

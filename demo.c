@@ -152,7 +152,7 @@ int main(void)
   char file_data[0x4FFFF];
   uint8_t mem_pool[0x4FFFF];
   char output[0x4FFFF];
-
+  jes_status err;
   //printf("\nSize of jes_context: %d bytes", sizeof(struct jes_context));
   //printf("\nSize of jes_parser_context: %d bytes", sizeof(struct jes_parser_context));
   //printf("\nSize of jes_node: %d bytes", sizeof(struct jes_node));
@@ -175,7 +175,7 @@ int main(void)
     printf("\n Context init failed!");
   }
 
-  if (0 == jes_parse(ctx, file_data, sizeof(file_data))) {
+  if (0 == (err = jes_parse(ctx, file_data, sizeof(file_data)))) {
     printf("\nSize of JSON data: %lld bytes", strnlen(file_data, sizeof(file_data)));
     //printf("\nMemory required: %d bytes for %d elements.", ctx->node_count*sizeof(struct jes_node), ctx->node_count);
 
@@ -187,7 +187,7 @@ int main(void)
     printf("\nJSON length: %lld", strlen(output));
   }
   else {
-    printf("\nFAILED");
+    printf("\nFAILED, %d", err);
   }
   return 0;
 }

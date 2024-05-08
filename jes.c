@@ -51,8 +51,9 @@ enum jes_parser_state {
   JES_STATE_START = 0,
   JES_STATE_WANT_KEY,
   JES_STATE_WANT_VALUE,
-  JES_STATE_WANT_ARRAY,
-  JES_STATE_STRUCTURE_END,
+  JES_STATE_PROPERTY_END,   /* End of key:value pair */
+  JES_STATE_VALUE_END,      /* End of value inside an array */
+  JES_STATE_STRUCTURE_END,  /* End of object or array structure */
 };
 
 typedef int16_t jes_node_descriptor;
@@ -483,6 +484,15 @@ static struct jes_token jes_get_token(struct jes_parser_context *pacx)
   return token;
 }
 
+static enum jes_node_type jes_get_parent_type(struct jes_parser_context *pacx,
+                                              struct jes_node *node)
+{
+  if (node) {
+    return pacx->pool[node->parent].data.type;
+  }
+  return JES_NONE;
+}
+
 static struct jes_node *jes_find_duplicated_key(struct jes_parser_context *pacx,
               struct jes_node *object_node, struct jes_token *key_token)
 {
@@ -514,8 +524,7 @@ static struct jes_node *jes_find_duplicated_key(struct jes_parser_context *pacx,
 
 static bool jes_accept(struct jes_parser_context *pacx,
                        enum jes_token_type token_type,
-                       enum jes_node_type node_type,
-                       enum jes_parser_state state)
+                       enum jes_node_type node_type)
 {
   if (pacx->token.type == token_type) {
 #if 0
@@ -582,7 +591,6 @@ static bool jes_accept(struct jes_parser_context *pacx,
         break;
     }
 
-    pacx->state = state;
     pacx->token = jes_get_token(pacx);
     return true;
   }
@@ -591,15 +599,14 @@ static bool jes_accept(struct jes_parser_context *pacx,
 
 static bool jes_expect(struct jes_parser_context *pacx,
                        enum jes_token_type token_type,
-                       enum jes_node_type node_type,
-                       enum jes_parser_state state)
+                       enum jes_node_type node_type)
 {
-  if (jes_accept(pacx, token_type, node_type, state)) {
+  if (jes_accept(pacx, token_type, node_type)) {
     return true;
   }
 #ifndef NDEBUG
-  printf("\nJES::Parser error! Unexpected Token. expected: %s, got: %s \"%.*s\"",
-      jes_token_type_str[token_type], jes_token_type_str[pacx->token.type], pacx->token.length,
+  printf("\nJES.Parser error! Unexpected Token. %s \"%.*s\"",
+      jes_token_type_str[pacx->token.type], pacx->token.length,
       &pacx->json_data[pacx->token.offset]);
 #endif
   return false;
@@ -638,7 +645,6 @@ struct jes_context* jes_init_context(void *mem_pool, uint32_t pool_size)
 
 jes_status jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_length)
 {
-  jes_status result = 0;
   struct jes_parser_context *pacx = ctx->pacx;
   pacx->json_data = json_data;
   pacx->json_size = json_length;
@@ -646,11 +652,11 @@ jes_status jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_len
   pacx->token = jes_get_token(pacx);
 
   while (pacx->token.type != JES_TOKEN_EOF) {
-
     switch (pacx->state) {
       /* Only an opening bracket is acceptable in this state. */
       case JES_STATE_START:
-        if (jes_expect(pacx, JES_TOKEN_OPENING_BRACKET, JES_OBJECT, JES_STATE_WANT_KEY)) {
+        if (jes_expect(pacx, JES_TOKEN_OPENING_BRACKET, JES_OBJECT)) {
+          pacx->state = JES_STATE_WANT_KEY;
           continue;
         }
 
@@ -660,76 +666,114 @@ jes_status jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_len
       /* An opening parenthesis has already been found.
          A closing bracket is allowed. Otherwise, only a KEY is acceptable. */
       case JES_STATE_WANT_KEY:
-        if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE, JES_STATE_STRUCTURE_END)) {
+        if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE)) {
+          pacx->state = JES_STATE_STRUCTURE_END;
           continue;
         }
 
-        if (jes_expect(pacx, JES_TOKEN_STRING, JES_KEY, JES_STATE_WANT_VALUE) &&
-            jes_expect(pacx, JES_TOKEN_COLON, JES_NONE, JES_STATE_WANT_VALUE)) {
+        if (jes_expect(pacx, JES_TOKEN_STRING, JES_KEY) &&
+            jes_expect(pacx, JES_TOKEN_COLON, JES_NONE)) {
+          pacx->state = JES_STATE_WANT_VALUE;
           continue;
         }
 
-        ctx->status = 1;
+        ctx->status = 2;
+        break;
+
+      case JES_STATE_WANT_VALUE:
+        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACKET, JES_OBJECT)) {
+          pacx->state = JES_STATE_WANT_KEY;
+          continue;
+        }
+
+        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACE, JES_ARRAY)) {
+          pacx->state = JES_STATE_WANT_VALUE;
+          continue;
+        }
+
+        if (jes_accept(pacx, JES_TOKEN_STRING, JES_VALUE_STRING) ||
+            jes_accept(pacx, JES_TOKEN_NUMBER, JES_VALUE_NUMBER)   ||
+            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_VALUE_BOOLEAN) ||
+            jes_accept(pacx, JES_TOKEN_NULL, JES_VALUE_NULL)) {
+          if (jes_get_parent_type(pacx, pacx->iter) == JES_KEY) {
+            pacx->state = JES_STATE_PROPERTY_END;
+          }
+          else if (jes_get_parent_type(pacx, pacx->iter) == JES_ARRAY) {
+            pacx->state = JES_STATE_VALUE_END;
+          }
+          else {
+            assert(0);
+          }
+          continue;
+        }
+
+        if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE)) {
+          pacx->state = JES_STATE_STRUCTURE_END;
+          continue;
+        }
+
+        ctx->status = 3;
         break;
 
       /* A Structure can be an Object or an Array.
          When a structure is closed, another closing symbol is allowed.
          Otherwise, only a separator is acceptable. */
+      case JES_STATE_PROPERTY_END:
+        if (jes_accept(pacx, JES_TOKEN_COMMA, JES_NONE)) {
+          pacx->state = JES_STATE_WANT_KEY;
+          continue;
+        }
+
+        if (jes_expect(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE)) {
+          pacx->state = JES_STATE_STRUCTURE_END;
+          continue;
+        }
+
+        ctx->status = 5;
+        break;
+
+      /* A Structure can be an Object or an Array.
+         When a structure is closed, another closing symbol is allowed.
+         Otherwise, only a separator is acceptable. */
+      case JES_STATE_VALUE_END:
+        if (jes_accept(pacx, JES_TOKEN_COMMA, JES_NONE)) {
+          pacx->state = JES_STATE_WANT_VALUE;
+          continue;
+        }
+        if (jes_expect(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE)) {
+          pacx->state = JES_STATE_STRUCTURE_END;
+          continue;
+        }
+
+        ctx->status = 6;
+        break;
+      /* A Structure can be an Object or an Array.
+         When a structure is closed, another closing symbol is allowed.
+         Otherwise, only a separator is acceptable. */
       case JES_STATE_STRUCTURE_END:
-        if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE, JES_STATE_STRUCTURE_END) ||
-            jes_accept(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE, JES_STATE_STRUCTURE_END)) {
-          continue;
-        }
-
-        if (jes_expect(pacx, JES_TOKEN_COMMA, JES_NONE, JES_STATE_WANT_KEY)) {
-          continue;
-        }
-
-        ctx->status = 1;
-        break;
-
-      case JES_STATE_WANT_VALUE:
-        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACKET, JES_OBJECT, JES_STATE_WANT_KEY)) {
-          continue;
-        }
-
-        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACE, JES_ARRAY, JES_STATE_WANT_ARRAY)) {
-          continue;
-        }
-
-        if (jes_accept(pacx, JES_TOKEN_STRING, JES_VALUE_STRING, JES_STATE_STRUCTURE_END) ||
-            jes_accept(pacx, JES_TOKEN_NUMBER, JES_VALUE_NUMBER, JES_STATE_STRUCTURE_END)   ||
-            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_VALUE_BOOLEAN, JES_STATE_STRUCTURE_END) ||
-            jes_accept(pacx, JES_TOKEN_NULL, JES_VALUE_NULL, JES_STATE_STRUCTURE_END)) {
-          continue;
-        }
-
-        ctx->status = 1;
-        break;
-
-      case JES_STATE_WANT_ARRAY:
-        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACKET, JES_OBJECT, JES_STATE_WANT_KEY)) {
-          continue;
-        }
-
-        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACE, JES_ARRAY, JES_STATE_WANT_ARRAY)) {
-          continue;
-        }
-
-        if (jes_accept(pacx, JES_TOKEN_STRING, JES_VALUE_STRING, JES_STATE_WANT_ARRAY) ||
-            jes_accept(pacx, JES_TOKEN_NUMBER, JES_VALUE_NUMBER, JES_STATE_WANT_ARRAY)   ||
-            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_VALUE_BOOLEAN, JES_STATE_WANT_ARRAY) ||
-            jes_accept(pacx, JES_TOKEN_NULL, JES_VALUE_NULL, JES_STATE_WANT_ARRAY)) {
-          if (jes_accept(pacx, JES_TOKEN_COMMA, JES_NONE, JES_STATE_WANT_ARRAY)) {
+        if (jes_get_parent_type(pacx, pacx->iter) == JES_KEY) {
+          if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE)) {
+            pacx->state = JES_STATE_STRUCTURE_END;
             continue;
           }
-
-          if (jes_expect(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE, JES_STATE_STRUCTURE_END)) {
+          pacx->state = JES_STATE_WANT_KEY;
+        }
+        else if(jes_get_parent_type(pacx, pacx->iter) == JES_ARRAY) {
+          if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE)) {
+            pacx->state = JES_STATE_STRUCTURE_END;
             continue;
           }
+          pacx->state = JES_STATE_WANT_VALUE;
+        }
+        else {
+          assert(0);
         }
 
-        ctx->status = 1;
+        if (jes_expect(pacx, JES_TOKEN_COMMA, JES_NONE)) {
+          continue;
+        }
+
+        ctx->status = 7;
         break;
 
       default:

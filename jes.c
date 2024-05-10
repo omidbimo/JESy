@@ -581,7 +581,7 @@ static bool jes_accept(struct jes_parser_context *pacx,
       if (pacx->iter->data.type != JES_ARRAY) {
         pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_ARRAY);
       }
-      pacx->iter = jes_get_parent_node(pacx, pacx->iter);
+      pacx->iter = jes_get_structure_parent_node(pacx, pacx->iter);
     }
     else if (token_type == JES_TOKEN_CLOSING_BRACKET) {
       /* {} (empty object)is a special case that needs no iteration in the
@@ -589,7 +589,7 @@ static bool jes_accept(struct jes_parser_context *pacx,
       if (pacx->iter->data.type != JES_OBJECT) {
         pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_OBJECT);
       }
-      pacx->iter = jes_get_parent_node(pacx, pacx->iter);
+      pacx->iter = jes_get_structure_parent_node(pacx, pacx->iter);
     }
     else if (token_type == JES_TOKEN_COMMA) {
       if ((pacx->iter->data.type != JES_OBJECT) && (pacx->iter->data.type != JES_ARRAY)) {
@@ -658,7 +658,8 @@ jes_status jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_len
   /* Fetch the first token to before entering the state machine. */
   pacx->token = jes_get_token(pacx);
 
-  while ((pacx->token.type != JES_TOKEN_EOF) && (ctx->status == 0)) {
+  do {
+    if (pacx->token.type == JES_TOKEN_EOF) break;
     //if (pacx->iter)printf("\n    State: %s, node: %s", jes_state_str[pacx->state], jes_node_type_str[pacx->iter->data.type]);
     switch (pacx->state) {
       /* Only an opening bracket is acceptable in this state. */
@@ -686,7 +687,7 @@ jes_status jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_len
         break;
 
       case JES_STATE_WANT_VALUE:
-        if (jes_accept(pacx, JES_TOKEN_STRING, JES_VALUE_STRING, JES_STATE_PROPERTY_END) ||
+        if (jes_accept(pacx, JES_TOKEN_STRING, JES_VALUE_STRING, JES_STATE_PROPERTY_END)   ||
             jes_accept(pacx, JES_TOKEN_NUMBER, JES_VALUE_NUMBER, JES_STATE_PROPERTY_END)   ||
             jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_VALUE_BOOLEAN, JES_STATE_PROPERTY_END) ||
             jes_accept(pacx, JES_TOKEN_NULL, JES_VALUE_NULL, JES_STATE_PROPERTY_END)) {
@@ -705,7 +706,7 @@ jes_status jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_len
         break;
 
       case JES_STATE_WANT_ARRAY:
-        if (jes_accept(pacx, JES_TOKEN_STRING, JES_VALUE_STRING, JES_STATE_VALUE_END) ||
+        if (jes_accept(pacx, JES_TOKEN_STRING, JES_VALUE_STRING, JES_STATE_VALUE_END)   ||
             jes_accept(pacx, JES_TOKEN_NUMBER, JES_VALUE_NUMBER, JES_STATE_VALUE_END)   ||
             jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_VALUE_BOOLEAN, JES_STATE_VALUE_END) ||
             jes_accept(pacx, JES_TOKEN_NULL, JES_VALUE_NULL, JES_STATE_VALUE_END)) {
@@ -759,7 +760,7 @@ jes_status jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_len
          When a structure is closed, another closing symbol is allowed.
          Otherwise, only a separator is acceptable. */
       case JES_STATE_STRUCTURE_END:
-        if (pacx->iter->data.type == JES_KEY) {
+        if (pacx->iter->data.type == JES_OBJECT) {
           if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE, JES_STATE_STRUCTURE_END)) {
             continue;
           }
@@ -788,12 +789,16 @@ jes_status jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_len
     }
 
     break;
-  }
+  } while ((pacx->iter) && (ctx->status == 0));
 
   if (ctx->status == 0) {
-    if ((pacx->token.type != JES_TOKEN_EOF) || (pacx->iter)) {
-      printf("\nParse failed! %d, %llX", pacx->token.type, pacx->iter);
+    if (pacx->token.type != JES_TOKEN_EOF) {
+      printf("\nJES.Parser error! Expected EOF, but got: %s", jes_token_type_str[pacx->token.type]);
       ctx->status = 100;
+    }
+    if (pacx->iter) {
+      printf("\nJES.Parser error! Expected data but got EOF.");
+      ctx->status = 101;
     }
 
   }

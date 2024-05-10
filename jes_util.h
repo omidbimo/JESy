@@ -42,6 +42,7 @@ static char jes_state_str[][20] = {
   "STATE_START",
   "STATE_WANT_KEY",
   "STATE_WANT_VALUE",
+  "STATE_WANT_ARRAY",
   "STATE_PROPERTY_END",
   "STATE_VALUE_END",
   "STATE_STRUCTURE_END",

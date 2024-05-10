@@ -51,6 +51,7 @@ enum jes_parser_state {
   JES_STATE_START = 0,
   JES_STATE_WANT_KEY,
   JES_STATE_WANT_VALUE,
+  JES_STATE_WANT_ARRAY,
   JES_STATE_PROPERTY_END,   /* End of key:value pair */
   JES_STATE_VALUE_END,      /* End of value inside an array */
   JES_STATE_STRUCTURE_END,  /* End of object or array structure */
@@ -521,76 +522,81 @@ static struct jes_node *jes_find_duplicated_key(struct jes_parser_context *pacx,
   }
   return duplicated;
 }
-
+/*
+ *  Parser state machine steps
+ *    1. Accept
+ *    2. Append
+ *    3. Iterate
+ *    4. State transition
+*/
 static bool jes_accept(struct jes_parser_context *pacx,
                        enum jes_token_type token_type,
-                       enum jes_node_type node_type)
+                       enum jes_node_type node_type,
+                       enum jes_parser_state state)
 {
   if (pacx->token.type == token_type) {
 #if 0
     if (pacx->iter)
     printf("\n - [%d] %s, parent:[%d], right:%d, child:%d", pacx->iter - pacx->pool, jes_node_type_str[pacx->iter->data.type], pacx->iter->parent, pacx->iter->right, pacx->iter->child);
 #endif
-    switch (node_type) {
-      case JES_KEY:            /* Fall through intended. */
-        {
-          /* If there is already a key with the same name, we'll overwrite it. */
-          struct jes_node *node = jes_find_duplicated_key(pacx, pacx->iter, &pacx->token);
-          if (node) {
-            jes_delete_node(pacx, jes_get_child_node(pacx, node));
-            pacx->iter = node;
-            break;
-          }
-        }
-      case JES_OBJECT:         /* Fall through intended. */
-      case JES_VALUE_STRING:   /* Fall through intended. */
-      case JES_VALUE_NUMBER:   /* Fall through intended. */
-      case JES_VALUE_BOOLEAN:  /* Fall through intended. */
-      case JES_VALUE_NULL:     /* Fall through intended. */
-      case JES_ARRAY:
+    if (node_type == JES_KEY) {
+      /* No duplicated keys in the same object are allowed.
+         Only the last key:value will be reported if the keys are duplicated. */
+      struct jes_node *node = jes_find_duplicated_key(pacx, pacx->iter, &pacx->token);
+      if (node) {
+        jes_delete_node(pacx, jes_get_child_node(pacx, node));
+        pacx->iter = node;
+      }
+      else {
         pacx->iter = jes_add_node(pacx, pacx->iter, node_type, pacx->token.offset, pacx->token.length);
-        if (!pacx->iter) {
-          /* Allocation is failed. */
-          return false;
-        }
-
         JES_LOG_NODE(pacx->iter - pacx->pool, pacx->iter->data.type, pacx->iter->parent, pacx->iter->right, pacx->iter->child);
-        break;
-
-      case JES_NONE:
-        /* Some tokens signaling an upward move through the tree.
-           A ']' indicates the end of an Array and thus the end of a key:value
-                 pair. Go back to the parent object.
-           A '}' indicates the end of an object. Go back to the parent object
-           A ',' indicates the end of a value.
-                 if the value is a part of an array, go back parent array node.
-                 otherwise, go back to the parent object.
-        */
-        if (token_type == JES_TOKEN_CLOSING_BRACE) {
-          /* End of an empty Array. No upward move to the parent node. */
-          if ((pacx->iter->data.type == JES_ARRAY) && (!HAS_CHILD(pacx->iter))) {
-            break;
-          }
-          pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_ARRAY);
-        }
-        else if (token_type == JES_TOKEN_CLOSING_BRACKET) {
-          /* End of an empty Object. No upward move to the parent node. */
-          if ((pacx->iter->data.type == JES_OBJECT) && (!HAS_CHILD(pacx->iter))) {
-            break;
-          }
-          pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_OBJECT);
-        }
-        else if (token_type == JES_TOKEN_COMMA) {
-          pacx->iter = jes_get_structure_parent_node(pacx, pacx->iter);
-        }
-
-        assert(pacx->iter);
-        break;
-      default:
-
-        break;
+      }
+    }
+    else if ((node_type == JES_OBJECT)        ||
+             (node_type == JES_VALUE_STRING)  ||
+             (node_type == JES_VALUE_NUMBER)  ||
+             (node_type == JES_VALUE_BOOLEAN) ||
+             (node_type == JES_VALUE_NULL)    ||
+             (node_type == JES_ARRAY)) {
+      pacx->iter = jes_add_node(pacx, pacx->iter, node_type, pacx->token.offset, pacx->token.length);
+      JES_LOG_NODE(pacx->iter - pacx->pool, pacx->iter->data.type, pacx->iter->parent, pacx->iter->right, pacx->iter->child);
     }
 
+    if (!pacx->iter) {
+      /* Allocation is failed. */
+      return false;
+    }
+
+    /* Some tokens signaling an upward move through the tree.
+       A ']' indicates the end of an Array and thus the end of a key:value
+             pair. Go back to the parent object.
+       A '}' indicates the end of an object. Go back to the parent object
+       A ',' indicates the end of a value.
+             if the value is a part of an array, go back parent array node.
+             otherwise, go back to the parent object.
+    */
+    if (token_type == JES_TOKEN_CLOSING_BRACE) {
+      /* [] (empty array) is a special case that needs no iteration in the
+         direction the parent node. */
+      if (pacx->iter->data.type != JES_ARRAY) {
+        pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_ARRAY);
+      }
+      pacx->iter = jes_get_parent_node(pacx, pacx->iter);
+    }
+    else if (token_type == JES_TOKEN_CLOSING_BRACKET) {
+      /* {} (empty object)is a special case that needs no iteration in the
+         direction the parent node. */
+      if (pacx->iter->data.type != JES_OBJECT) {
+        pacx->iter = jes_get_parent_node_bytype(pacx, pacx->iter, JES_OBJECT);
+      }
+      pacx->iter = jes_get_parent_node(pacx, pacx->iter);
+    }
+    else if (token_type == JES_TOKEN_COMMA) {
+      if ((pacx->iter->data.type != JES_OBJECT) && (pacx->iter->data.type != JES_ARRAY)) {
+        pacx->iter = jes_get_structure_parent_node(pacx, pacx->iter);
+      }
+    }
+    pacx->state = state;
     pacx->token = jes_get_token(pacx);
     return true;
   }
@@ -599,9 +605,10 @@ static bool jes_accept(struct jes_parser_context *pacx,
 
 static bool jes_expect(struct jes_parser_context *pacx,
                        enum jes_token_type token_type,
-                       enum jes_node_type node_type)
+                       enum jes_node_type node_type,
+                       enum jes_parser_state state)
 {
-  if (jes_accept(pacx, token_type, node_type)) {
+  if (jes_accept(pacx, token_type, node_type, state)) {
     return true;
   }
 #ifndef NDEBUG
@@ -651,12 +658,12 @@ jes_status jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_len
   /* Fetch the first token to before entering the state machine. */
   pacx->token = jes_get_token(pacx);
 
-  while (pacx->token.type != JES_TOKEN_EOF) {
+  while ((pacx->token.type != JES_TOKEN_EOF) && (ctx->status == 0)) {
+    //if (pacx->iter)printf("\n    State: %s, node: %s", jes_state_str[pacx->state], jes_node_type_str[pacx->iter->data.type]);
     switch (pacx->state) {
       /* Only an opening bracket is acceptable in this state. */
       case JES_STATE_START:
-        if (jes_expect(pacx, JES_TOKEN_OPENING_BRACKET, JES_OBJECT)) {
-          pacx->state = JES_STATE_WANT_KEY;
+        if (jes_expect(pacx, JES_TOKEN_OPENING_BRACKET, JES_OBJECT, JES_STATE_WANT_KEY)) {
           continue;
         }
 
@@ -666,14 +673,12 @@ jes_status jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_len
       /* An opening parenthesis has already been found.
          A closing bracket is allowed. Otherwise, only a KEY is acceptable. */
       case JES_STATE_WANT_KEY:
-        if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE)) {
-          pacx->state = JES_STATE_STRUCTURE_END;
+        if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE, JES_STATE_STRUCTURE_END)) {
           continue;
         }
 
-        if (jes_expect(pacx, JES_TOKEN_STRING, JES_KEY) &&
-            jes_expect(pacx, JES_TOKEN_COLON, JES_NONE)) {
-          pacx->state = JES_STATE_WANT_VALUE;
+        if (jes_expect(pacx, JES_TOKEN_STRING, JES_KEY, JES_STATE_WANT_VALUE) &&
+            jes_expect(pacx, JES_TOKEN_COLON, JES_NONE, JES_STATE_WANT_VALUE)) {
           continue;
         }
 
@@ -681,51 +686,55 @@ jes_status jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_len
         break;
 
       case JES_STATE_WANT_VALUE:
-        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACKET, JES_OBJECT)) {
-          pacx->state = JES_STATE_WANT_KEY;
+        if (jes_accept(pacx, JES_TOKEN_STRING, JES_VALUE_STRING, JES_STATE_PROPERTY_END) ||
+            jes_accept(pacx, JES_TOKEN_NUMBER, JES_VALUE_NUMBER, JES_STATE_PROPERTY_END)   ||
+            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_VALUE_BOOLEAN, JES_STATE_PROPERTY_END) ||
+            jes_accept(pacx, JES_TOKEN_NULL, JES_VALUE_NULL, JES_STATE_PROPERTY_END)) {
           continue;
         }
 
-        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACE, JES_ARRAY)) {
-          pacx->state = JES_STATE_WANT_VALUE;
+        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACKET, JES_OBJECT, JES_STATE_WANT_KEY)) {
           continue;
         }
 
-        if (jes_accept(pacx, JES_TOKEN_STRING, JES_VALUE_STRING) ||
-            jes_accept(pacx, JES_TOKEN_NUMBER, JES_VALUE_NUMBER)   ||
-            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_VALUE_BOOLEAN) ||
-            jes_accept(pacx, JES_TOKEN_NULL, JES_VALUE_NULL)) {
-          if (jes_get_parent_type(pacx, pacx->iter) == JES_KEY) {
-            pacx->state = JES_STATE_PROPERTY_END;
-          }
-          else if (jes_get_parent_type(pacx, pacx->iter) == JES_ARRAY) {
-            pacx->state = JES_STATE_VALUE_END;
-          }
-          else {
-            assert(0);
-          }
-          continue;
-        }
-
-        if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE)) {
-          pacx->state = JES_STATE_STRUCTURE_END;
+        if (jes_expect(pacx, JES_TOKEN_OPENING_BRACE, JES_ARRAY, JES_STATE_WANT_ARRAY)) {
           continue;
         }
 
         ctx->status = 3;
         break;
 
+      case JES_STATE_WANT_ARRAY:
+        if (jes_accept(pacx, JES_TOKEN_STRING, JES_VALUE_STRING, JES_STATE_VALUE_END) ||
+            jes_accept(pacx, JES_TOKEN_NUMBER, JES_VALUE_NUMBER, JES_STATE_VALUE_END)   ||
+            jes_accept(pacx, JES_TOKEN_BOOLEAN, JES_VALUE_BOOLEAN, JES_STATE_VALUE_END) ||
+            jes_accept(pacx, JES_TOKEN_NULL, JES_VALUE_NULL, JES_STATE_VALUE_END)) {
+          continue;
+        }
+
+        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACKET, JES_OBJECT, JES_STATE_WANT_KEY)) {
+          continue;
+        }
+
+        if (jes_accept(pacx, JES_TOKEN_OPENING_BRACE, JES_ARRAY, JES_STATE_WANT_ARRAY)) {
+          continue;
+        }
+
+        if (jes_expect(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE, JES_STATE_STRUCTURE_END)) {
+          continue;
+        }
+
+        ctx->status = 4;
+        break;
       /* A Structure can be an Object or an Array.
          When a structure is closed, another closing symbol is allowed.
          Otherwise, only a separator is acceptable. */
       case JES_STATE_PROPERTY_END:
-        if (jes_accept(pacx, JES_TOKEN_COMMA, JES_NONE)) {
-          pacx->state = JES_STATE_WANT_KEY;
+        if (jes_accept(pacx, JES_TOKEN_COMMA, JES_NONE, JES_STATE_WANT_KEY)) {
           continue;
         }
 
-        if (jes_expect(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE)) {
-          pacx->state = JES_STATE_STRUCTURE_END;
+        if (jes_expect(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE, JES_STATE_STRUCTURE_END)) {
           continue;
         }
 
@@ -736,12 +745,11 @@ jes_status jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_len
          When a structure is closed, another closing symbol is allowed.
          Otherwise, only a separator is acceptable. */
       case JES_STATE_VALUE_END:
-        if (jes_accept(pacx, JES_TOKEN_COMMA, JES_NONE)) {
-          pacx->state = JES_STATE_WANT_VALUE;
+        if (jes_accept(pacx, JES_TOKEN_COMMA, JES_NONE, JES_STATE_WANT_ARRAY)) {
           continue;
         }
-        if (jes_expect(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE)) {
-          pacx->state = JES_STATE_STRUCTURE_END;
+
+        if (jes_expect(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE, JES_STATE_STRUCTURE_END)) {
           continue;
         }
 
@@ -751,26 +759,24 @@ jes_status jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_len
          When a structure is closed, another closing symbol is allowed.
          Otherwise, only a separator is acceptable. */
       case JES_STATE_STRUCTURE_END:
-        if (jes_get_parent_type(pacx, pacx->iter) == JES_KEY) {
-          if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE)) {
-            pacx->state = JES_STATE_STRUCTURE_END;
+        if (pacx->iter->data.type == JES_KEY) {
+          if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACKET, JES_NONE, JES_STATE_STRUCTURE_END)) {
             continue;
           }
-          pacx->state = JES_STATE_WANT_KEY;
-        }
-        else if(jes_get_parent_type(pacx, pacx->iter) == JES_ARRAY) {
-          if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE)) {
-            pacx->state = JES_STATE_STRUCTURE_END;
-            continue;
-          }
-          pacx->state = JES_STATE_WANT_VALUE;
-        }
-        else {
-          assert(0);
-        }
 
-        if (jes_expect(pacx, JES_TOKEN_COMMA, JES_NONE)) {
-          continue;
+          if (jes_expect(pacx, JES_TOKEN_COMMA, JES_NONE, JES_STATE_WANT_KEY)) {
+            continue;
+          }
+
+        }
+        else if(pacx->iter->data.type == JES_ARRAY) {
+          if (jes_accept(pacx, JES_TOKEN_CLOSING_BRACE, JES_NONE, JES_STATE_STRUCTURE_END)) {
+            continue;
+          }
+
+          if (jes_expect(pacx, JES_TOKEN_COMMA, JES_NONE, JES_STATE_WANT_VALUE)) {
+            continue;
+          }
         }
 
         ctx->status = 7;
@@ -784,6 +790,13 @@ jes_status jes_parse(struct jes_context *ctx, char *json_data, uint32_t json_len
     break;
   }
 
+  if (ctx->status == 0) {
+    if ((pacx->token.type != JES_TOKEN_EOF) || (pacx->iter)) {
+      printf("\nParse failed! %d, %llX", pacx->token.type, pacx->iter);
+      ctx->status = 100;
+    }
+
+  }
   ctx->node_count = pacx->allocated;
   ctx->required_mem = pacx->allocated * sizeof(struct jes_node);
   return ctx->status;

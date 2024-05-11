@@ -1,7 +1,8 @@
 #ifndef JESY_H
 #define JESY_H
 
-#define FOR_EACH()
+#include <stdbool.h>
+#include <stdint.h>
 
 struct jesy_parser_context; /* Forward declaration */
 typedef uint32_t jesy_status;
@@ -25,7 +26,7 @@ enum jesy_node_type {
   JESY_VALUE_NULL,
 };
 
-struct jesy_json_element {
+struct jessy_element {
   uint16_t type; /* of type enum jesy_node_type */
   uint16_t length;
   char    *value;
@@ -35,11 +36,16 @@ struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size);
 jesy_status jesy_parse(struct jesy_context* ctx, char *json_data, uint32_t json_length);
 jesy_status jesy_serialize(struct jesy_context *ctx, char *json_data, uint32_t length);
 
-struct jesy_json_element jesy_get_key(struct jesy_context *ctx, char *name);
+struct jessy_element jesy_get_key(struct jesy_context *ctx, char *name);
 void jesy_reset_iterator(struct jesy_context *ctx);
-struct jesy_json_element jesy_get_root(struct jesy_context *ctx);
-struct jesy_json_element jesy_get_parent(struct jesy_context *ctx);
-struct jesy_json_element jesy_get_child(struct jesy_context *ctx);
-struct jesy_json_element jesy_get_next(struct jesy_context *ctx);
+struct jessy_element jesy_get_root(struct jesy_context *ctx);
+struct jessy_element jesy_get_parent(struct jesy_context *ctx);
+struct jessy_element jesy_get_child(struct jesy_context *ctx);
+struct jessy_element jesy_get_next(struct jesy_context *ctx);
 void jesy_print(struct jesy_context *ctx);
+
+struct jesy_element jesy_get(struct jesy_context *ctx, char *key);
+bool jesy_find(struct jesy_context *ctx, char *key);
+bool jesy_has(struct jesy_context *ctx, char *key);
+enum jesy_node_type jesy_get_type(struct jesy_context *ctx, char *key);
 #endif

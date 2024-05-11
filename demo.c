@@ -159,7 +159,7 @@ int main(void)
   //printf("\nSize of jesy_node: %d bytes", sizeof(struct jesy_node));
 
 
-  fp = fopen("test.json", "rb");
+  fp = fopen("test.soc", "rb");
 
   if (fp != NULL) {
     fread(file_data, sizeof(char), sizeof(file_data), fp);
@@ -175,14 +175,22 @@ int main(void)
   if (!ctx) {
     printf("\n Context init failed!");
   }
-
+  printf("\n JESy: Start parsing...");
   if (0 == (err = jesy_parse(ctx, file_data, sizeof(file_data)))) {
+    printf("\n JESy: Parsing end!");
     printf("\nSize of JSON data: %lld bytes", strnlen(file_data, sizeof(file_data)));
     //printf("\nMemory required: %d bytes for %d elements.", ctx->node_count*sizeof(struct jesy_node), ctx->node_count);
 
     //jesy_print(ctx);
     jesy_serialize(ctx, output, sizeof(output));
-    printf("\n\n%s", output);
+    //printf("\n\n%s", output);
+
+    //jesy_reset_iterator(ctx);
+    printf("\nHas \"StcRevData\": %s", jesy_find(ctx, "StcRevData") ? "True" : "False");
+    printf("\nHas \"devData\": %s", jesy_find(ctx, "devData") ? "True" : "False");
+    printf("\nHas \"MacId\": %s", jesy_find(ctx, "MacId") ? "True" : "False");
+    printf("\nType: \"devData\": %d", jesy_get_type(ctx, "devData"));
+    printf("\nType: \"IOs\": %d", jesy_get_type(ctx, "IOs"));
 
     //jesy_print_tree(ctx);
     printf("\nJSON length: %lld", strlen(output));

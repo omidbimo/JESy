@@ -3,8 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#include <stdint.h>
-#include <stdbool.h>
 #include <assert.h>
 #include "jesy.h"
 #include "jesy_util.h"
@@ -65,7 +63,7 @@ struct jesy_node {
   jesy_node_descriptor left;
   jesy_node_descriptor right;
   jesy_node_descriptor child;
-  struct jesy_json_element data;
+  struct jessy_element data;
 };
 
 struct jesy_tree_free_node {
@@ -775,6 +773,7 @@ jesy_status jesy_parse(struct jesy_context *ctx, char *json_data, uint32_t json_
     }
 
   }
+  ctx->pacx->iter = ctx->pacx->root;
   ctx->node_count = pacx->allocated;
   ctx->required_mem = pacx->allocated * sizeof(struct jesy_node);
   return ctx->status;
@@ -853,40 +852,40 @@ jesy_status jesy_serialize(struct jesy_context *ctx, char *json_data, uint32_t l
   return result;
 }
 
-struct jesy_json_element jesy_get_root(struct jesy_context *ctx)
+struct jessy_element jesy_get_root(struct jesy_context *ctx)
 {
   if (ctx) {
     ctx->pacx->iter = ctx->pacx->root;
     return ctx->pacx->iter->data;
   }
-  return (struct jesy_json_element){ 0 };
+  return (struct jessy_element){ 0 };
 }
 
-struct jesy_json_element jesy_get_parent(struct jesy_context *ctx)
+struct jessy_element jesy_get_parent(struct jesy_context *ctx)
 {
   if ((ctx) && HAS_PARENT(ctx->pacx->iter)) {
     ctx->pacx->iter = &ctx->pacx->pool[ctx->pacx->iter->parent];
     return ctx->pacx->iter->data;
   }
-  return (struct jesy_json_element){ 0 };
+  return (struct jessy_element){ 0 };
 }
 
-struct jesy_json_element jesy_get_child(struct jesy_context *ctx)
+struct jessy_element jesy_get_child(struct jesy_context *ctx)
 {
   if ((ctx) && HAS_CHILD(ctx->pacx->iter)) {
     ctx->pacx->iter = &ctx->pacx->pool[ctx->pacx->iter->child];
     return ctx->pacx->iter->data;
   }
-  return (struct jesy_json_element){ 0 };
+  return (struct jessy_element){ 0 };
 }
 
-struct jesy_json_element jesy_get_next(struct jesy_context *ctx)
+struct jessy_element jesy_get_next(struct jesy_context *ctx)
 {
   if ((ctx) && HAS_RIGHT(ctx->pacx->iter)) {
     ctx->pacx->iter = &ctx->pacx->pool[ctx->pacx->iter->right];
     return ctx->pacx->iter->data;
   }
-  return (struct jesy_json_element){ 0 };
+  return (struct jessy_element){ 0 };
 }
 
 void jesy_reset_iterator(struct jesy_context *ctx)
@@ -894,4 +893,96 @@ void jesy_reset_iterator(struct jesy_context *ctx)
   ctx->pacx->iter = ctx->pacx->root;
 }
 
+bool jesy_find(struct jesy_context *ctx, char *key)
+{
+  bool result = false;
+  struct jesy_node *iter = ctx->pacx->iter;
+  uint16_t key_length = (uint16_t)strnlen(key, 0xFFFF);
+  if ((key_length == 0) || (key_length == 0xFFFF)) {
+    return false;
+  }
 
+  if (iter->data.type != JESY_OBJECT) {
+    if (!(iter = jesy_get_parent_node_bytype(ctx->pacx, iter, JESY_OBJECT))) {
+      return false;
+    }
+  }
+
+  iter = jesy_get_child_node(ctx->pacx, iter);
+  assert(iter);
+  assert(iter->data.type == JESY_KEY);
+
+  while (iter) {
+    if ((iter->data.length == key_length) &&
+        (memcmp(iter->data.value, key, key_length) == 0)) {
+      ctx->pacx->iter = iter;
+      result = true;
+      break;
+    }
+    iter = jesy_get_right_node(ctx->pacx, iter);
+  }
+  return result;
+}
+
+bool jesy_has(struct jesy_context *ctx, char *key)
+{
+  bool result = false;
+  struct jesy_node *iter = ctx->pacx->iter;
+  uint16_t key_length = (uint16_t)strnlen(key, 0xFFFF);
+  if ((key_length == 0) || (key_length == 0xFFFF)) {
+    return false;
+  }
+
+  if (iter->data.type != JESY_OBJECT) {
+    if (!(iter = jesy_get_parent_node_bytype(ctx->pacx, iter, JESY_OBJECT))) {
+      return false;
+    }
+  }
+
+  iter = jesy_get_child_node(ctx->pacx, iter);
+  assert(iter);
+  assert(iter->data.type == JESY_KEY);
+
+  while (iter) {
+    if ((iter->data.length == key_length) &&
+        (memcmp(iter->data.value, key, key_length) == 0)) {
+      result = true;
+      break;
+    }
+    iter = jesy_get_right_node(ctx->pacx, iter);
+  }
+  return result;
+}
+
+
+enum jesy_node_type jesy_get_type(struct jesy_context *ctx, char *key)
+{
+  enum jesy_node_type result = JESY_NONE;
+  struct jesy_node *iter = ctx->pacx->iter;
+  uint16_t key_length = (uint16_t)strnlen(key, 0xFFFF);
+  if ((key_length == 0) || (key_length == 0xFFFF)) {
+    return false;
+  }
+
+  if (iter->data.type != JESY_OBJECT) {
+    if (!(iter = jesy_get_parent_node_bytype(ctx->pacx, iter, JESY_OBJECT))) {
+      return false;
+    }
+  }
+
+  iter = jesy_get_child_node(ctx->pacx, iter);
+  assert(iter);
+  assert(iter->data.type == JESY_KEY);
+
+  while (iter) {
+    if ((iter->data.length == key_length) &&
+        (memcmp(iter->data.value, key, key_length) == 0)) {
+      if (HAS_CHILD(iter)) {
+          result = jesy_get_child_node(ctx->pacx, iter)->data.type;
+          break;
+      }
+    }
+    iter = jesy_get_right_node(ctx->pacx, iter);
+  }
+  return result;
+}

@@ -147,10 +147,11 @@ void jesy_print_tree(struct jesy_context *ctx)
 #endif
 int main(void)
 {
+  #define POOL_SIZE 0x4FFFF
   struct jesy_context *ctx;
   FILE *fp;
   char file_data[0x4FFFF];
-  uint8_t mem_pool[0x4FFFF];
+  uint8_t mem_pool[POOL_SIZE];
   char output[0x4FFFF];
   jesy_status err;
   //printf("\nSize of jesy_context: %d bytes", sizeof(struct jesy_context));

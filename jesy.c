@@ -529,11 +529,12 @@ static struct jesy_node *jesy_find_duplicated_key(struct jesy_parser_context *pa
  *    3. Iterate
  *    4. State transition
 */
-static bool jesy_accept(struct jesy_parser_context *pacx,
+static bool jesy_accept(struct jesy_context *ctx,
                        enum jesy_token_type token_type,
                        enum jesy_node_type node_type,
                        enum jesy_parser_state state)
 {
+  struct jesy_parser_context *pacx = ctx->pacx;
   if (pacx->token.type == token_type) {
 #if 0
     if (pacx->iter)
@@ -548,7 +549,14 @@ static bool jesy_accept(struct jesy_parser_context *pacx,
         pacx->iter = node;
       }
       else {
-        pacx->iter = jesy_add_node(pacx, pacx->iter, node_type, pacx->token.offset, pacx->token.length);
+        struct jesy_node *new_node = NULL;
+        new_node = jesy_add_node(pacx, pacx->iter, node_type, pacx->token.offset, pacx->token.length);
+        if (!new_node) {
+          /* Allocation is failed. */
+          if (!ctx->status) ctx->status = 5; /* Keep the first error */
+          return false;
+        }
+        pacx->iter = new_node;
         JESY_LOG_NODE(pacx->iter - pacx->pool, pacx->iter->data.type, pacx->iter->parent, pacx->iter->right, pacx->iter->child);
       }
     }
@@ -558,15 +566,18 @@ static bool jesy_accept(struct jesy_parser_context *pacx,
              (node_type == JESY_VALUE_BOOLEAN) ||
              (node_type == JESY_VALUE_NULL)    ||
              (node_type == JESY_ARRAY)) {
-      pacx->iter = jesy_add_node(pacx, pacx->iter, node_type, pacx->token.offset, pacx->token.length);
+      struct jesy_node *new_node = NULL;
+      new_node = jesy_add_node(pacx, pacx->iter, node_type, pacx->token.offset, pacx->token.length);
+      if (!new_node) {
+        /* Allocation is failed. */
+        if (!ctx->status) ctx->status = 5; /* Keep the first error */
+        return false;
+      }
+      pacx->iter = new_node;
       JESY_LOG_NODE(pacx->iter - pacx->pool, pacx->iter->data.type, pacx->iter->parent, pacx->iter->right, pacx->iter->child);
     }
 
-    if (!pacx->iter) {
-      /* Allocation is failed. */
-      return false;
-    }
-
+    assert(pacx->iter);
     /* Some tokens signaling an upward move through the tree.
        A ']' indicates the end of an Array and thus the end of a key:value
              pair. Go back to the parent object.
@@ -603,19 +614,22 @@ static bool jesy_accept(struct jesy_parser_context *pacx,
   return false;
 }
 
-static bool jesy_expect(struct jesy_parser_context *pacx,
-                       enum jesy_token_type token_type,
-                       enum jesy_node_type node_type,
-                       enum jesy_parser_state state)
+static bool jesy_expect(struct jesy_context *ctx,
+                        enum jesy_token_type token_type,
+                        enum jesy_node_type node_type,
+                        enum jesy_parser_state state)
 {
-  if (jesy_accept(pacx, token_type, node_type, state)) {
+  if (jesy_accept(ctx, token_type, node_type, state)) {
     return true;
   }
+  if (!ctx->status) {
+    ctx->status = 1; /* Keep the first error */
 #ifndef NDEBUG
   printf("\nJES.Parser error! Unexpected Token. %s \"%.*s\"",
-      jesy_token_type_str[pacx->token.type], pacx->token.length,
-      &pacx->json_data[pacx->token.offset]);
+      jesy_token_type_str[ctx->pacx->token.type], ctx->pacx->token.length,
+      &ctx->pacx->json_data[ctx->pacx->token.offset]);
 #endif
+  }
   return false;
 }
 
@@ -664,123 +678,83 @@ jesy_status jesy_parse(struct jesy_context *ctx, char *json_data, uint32_t json_
     switch (pacx->state) {
       /* Only an opening bracket is acceptable in this state. */
       case JESY_STATE_START:
-        if (jesy_expect(pacx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT, JESY_STATE_WANT_KEY)) {
-          continue;
-        }
-
-        ctx->status = 1;
+        jesy_expect(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT, JESY_STATE_WANT_KEY);
         break;
 
       /* An opening parenthesis has already been found.
          A closing bracket is allowed. Otherwise, only a KEY is acceptable. */
       case JESY_STATE_WANT_KEY:
-        if (jesy_accept(pacx, JESY_TOKEN_CLOSING_BRACKET, JESY_NONE, JESY_STATE_STRUCTURE_END)) {
-          continue;
+        if (jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACKET, JESY_NONE, JESY_STATE_STRUCTURE_END)) {
+          break;
         }
 
-        if (jesy_expect(pacx, JESY_TOKEN_STRING, JESY_KEY, JESY_STATE_WANT_VALUE) &&
-            jesy_expect(pacx, JESY_TOKEN_COLON, JESY_NONE, JESY_STATE_WANT_VALUE)) {
-          continue;
+        if (jesy_expect(ctx, JESY_TOKEN_STRING, JESY_KEY, JESY_STATE_WANT_VALUE)) {
+          jesy_expect(ctx, JESY_TOKEN_COLON, JESY_NONE, JESY_STATE_WANT_VALUE);
         }
 
-        ctx->status = 2;
         break;
 
       case JESY_STATE_WANT_VALUE:
-        if (jesy_accept(pacx, JESY_TOKEN_STRING, JESY_VALUE_STRING, JESY_STATE_PROPERTY_END)   ||
-            jesy_accept(pacx, JESY_TOKEN_NUMBER, JESY_VALUE_NUMBER, JESY_STATE_PROPERTY_END)   ||
-            jesy_accept(pacx, JESY_TOKEN_BOOLEAN, JESY_VALUE_BOOLEAN, JESY_STATE_PROPERTY_END) ||
-            jesy_accept(pacx, JESY_TOKEN_NULL, JESY_VALUE_NULL, JESY_STATE_PROPERTY_END)) {
-          continue;
+        if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_VALUE_STRING, JESY_STATE_PROPERTY_END)   ||
+            jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_VALUE_NUMBER, JESY_STATE_PROPERTY_END)   ||
+            jesy_accept(ctx, JESY_TOKEN_BOOLEAN, JESY_VALUE_BOOLEAN, JESY_STATE_PROPERTY_END) ||
+            jesy_accept(ctx, JESY_TOKEN_NULL, JESY_VALUE_NULL, JESY_STATE_PROPERTY_END)       ||
+            jesy_accept(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT, JESY_STATE_WANT_KEY)) {
+          break;
         }
 
-        if (jesy_accept(pacx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT, JESY_STATE_WANT_KEY)) {
-          continue;
-        }
-
-        if (jesy_expect(pacx, JESY_TOKEN_OPENING_BRACE, JESY_ARRAY, JESY_STATE_WANT_ARRAY)) {
-          continue;
-        }
-
-        ctx->status = 3;
+        jesy_expect(ctx, JESY_TOKEN_OPENING_BRACE, JESY_ARRAY, JESY_STATE_WANT_ARRAY);
         break;
 
       case JESY_STATE_WANT_ARRAY:
-        if (jesy_accept(pacx, JESY_TOKEN_STRING, JESY_VALUE_STRING, JESY_STATE_VALUE_END)   ||
-            jesy_accept(pacx, JESY_TOKEN_NUMBER, JESY_VALUE_NUMBER, JESY_STATE_VALUE_END)   ||
-            jesy_accept(pacx, JESY_TOKEN_BOOLEAN, JESY_VALUE_BOOLEAN, JESY_STATE_VALUE_END) ||
-            jesy_accept(pacx, JESY_TOKEN_NULL, JESY_VALUE_NULL, JESY_STATE_VALUE_END)) {
-          continue;
+        if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_VALUE_STRING, JESY_STATE_VALUE_END)   ||
+            jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_VALUE_NUMBER, JESY_STATE_VALUE_END)   ||
+            jesy_accept(ctx, JESY_TOKEN_BOOLEAN, JESY_VALUE_BOOLEAN, JESY_STATE_VALUE_END) ||
+            jesy_accept(ctx, JESY_TOKEN_NULL, JESY_VALUE_NULL, JESY_STATE_VALUE_END)       ||
+            jesy_accept(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT, JESY_STATE_WANT_KEY) ||
+            jesy_accept(ctx, JESY_TOKEN_OPENING_BRACE, JESY_ARRAY, JESY_STATE_WANT_ARRAY)) {
+          break;
         }
 
-        if (jesy_accept(pacx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT, JESY_STATE_WANT_KEY)) {
-          continue;
-        }
-
-        if (jesy_accept(pacx, JESY_TOKEN_OPENING_BRACE, JESY_ARRAY, JESY_STATE_WANT_ARRAY)) {
-          continue;
-        }
-
-        if (jesy_expect(pacx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE, JESY_STATE_STRUCTURE_END)) {
-          continue;
-        }
-
-        ctx->status = 4;
+        jesy_expect(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE, JESY_STATE_STRUCTURE_END);
         break;
       /* A Structure can be an Object or an Array.
          When a structure is closed, another closing symbol is allowed.
          Otherwise, only a separator is acceptable. */
       case JESY_STATE_PROPERTY_END:
-        if (jesy_accept(pacx, JESY_TOKEN_COMMA, JESY_NONE, JESY_STATE_WANT_KEY)) {
+        if (jesy_accept(ctx, JESY_TOKEN_COMMA, JESY_NONE, JESY_STATE_WANT_KEY)) {
           continue;
         }
 
-        if (jesy_expect(pacx, JESY_TOKEN_CLOSING_BRACKET, JESY_NONE, JESY_STATE_STRUCTURE_END)) {
-          continue;
-        }
-
-        ctx->status = 5;
+        jesy_expect(ctx, JESY_TOKEN_CLOSING_BRACKET, JESY_NONE, JESY_STATE_STRUCTURE_END);
         break;
 
       /* A Structure can be an Object or an Array.
          When a structure is closed, another closing symbol is allowed.
          Otherwise, only a separator is acceptable. */
       case JESY_STATE_VALUE_END:
-        if (jesy_accept(pacx, JESY_TOKEN_COMMA, JESY_NONE, JESY_STATE_WANT_ARRAY)) {
-          continue;
+        if (jesy_accept(ctx, JESY_TOKEN_COMMA, JESY_NONE, JESY_STATE_WANT_ARRAY)) {
+          break;
         }
 
-        if (jesy_expect(pacx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE, JESY_STATE_STRUCTURE_END)) {
-          continue;
-        }
-
-        ctx->status = 6;
+        jesy_expect(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE, JESY_STATE_STRUCTURE_END);
         break;
       /* A Structure can be an Object or an Array.
          When a structure is closed, another closing symbol is allowed.
          Otherwise, only a separator is acceptable. */
       case JESY_STATE_STRUCTURE_END:
         if (pacx->iter->data.type == JESY_OBJECT) {
-          if (jesy_accept(pacx, JESY_TOKEN_CLOSING_BRACKET, JESY_NONE, JESY_STATE_STRUCTURE_END)) {
-            continue;
+          if (jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACKET, JESY_NONE, JESY_STATE_STRUCTURE_END)) {
+            break;
           }
-
-          if (jesy_expect(pacx, JESY_TOKEN_COMMA, JESY_NONE, JESY_STATE_WANT_KEY)) {
-            continue;
-          }
-
+          jesy_expect(ctx, JESY_TOKEN_COMMA, JESY_NONE, JESY_STATE_WANT_KEY);
         }
         else if(pacx->iter->data.type == JESY_ARRAY) {
-          if (jesy_accept(pacx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE, JESY_STATE_STRUCTURE_END)) {
-            continue;
+          if (jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE, JESY_STATE_STRUCTURE_END)) {
+            break;
           }
-
-          if (jesy_expect(pacx, JESY_TOKEN_COMMA, JESY_NONE, JESY_STATE_WANT_VALUE)) {
-            continue;
-          }
+          jesy_expect(ctx, JESY_TOKEN_COMMA, JESY_NONE, JESY_STATE_WANT_VALUE);
         }
-
-        ctx->status = 7;
         break;
 
       default:
@@ -788,7 +762,6 @@ jesy_status jesy_parse(struct jesy_context *ctx, char *json_data, uint32_t json_
         break;
     }
 
-    break;
   } while ((pacx->iter) && (ctx->status == 0));
 
   if (ctx->status == 0) {

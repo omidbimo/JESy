@@ -4,7 +4,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define JESY_OVERWRITE_DUPLICATED_KEYS
+/* Comment or undef to disable searching for duplicate keys and overwriting
+   their values if you're sure that there will be no duplicate keys in the
+   source JSON.
+   Disabling JESY_OVERWRITE_DUPLICATE_KEYS, will considerably improve the
+   parsing performance.
+   */
+#define JESY_OVERWRITE_DUPLICATE_KEYS
 
 struct jesy_parser_context; /* Forward declaration */
 

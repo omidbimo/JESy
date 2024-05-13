@@ -8,6 +8,7 @@
 #include "jesy_util.h"
 
 #define JESY_INVALID_INDEX 0xFFFF
+#define JESY_MAX_VALUE_LEN 0xFFFF
 
 #define UPDATE_TOKEN(tok, type_, offset_, size_) \
   tok.type = type_; \
@@ -62,10 +63,17 @@ enum jesy_parser_state {
 typedef uint16_t jesy_node_descriptor;
 
 struct jesy_node {
+  /* Index of the parent node. Each node holds the index of its parent. */
   jesy_node_descriptor parent;
+  /* Index */
   jesy_node_descriptor left;
+  /* Index */
   jesy_node_descriptor right;
+  /* Each parent keeps only the index of its first child. The remaining child nodes
+     will be tracked using the right member of the first child. */
   jesy_node_descriptor child;
+  /* The data member is a TLV (Type, Length, Value) which value is pointer to the
+     actual value of the node. See jesy.h */
   struct jessy_element data;
 };
 
@@ -80,7 +88,9 @@ struct jesy_token {
 };
 
 struct jesy_parser_context {
+  /* JSON data to be parsed */
   char     *json_data;
+  /* Length of JSON data in bytes. */
   uint32_t  json_size;
   /* Tokenizer uses this offset to track the consumed characters. */
   uint32_t  offset;
@@ -112,7 +122,7 @@ struct jesy_parser_context {
   struct jesy_free_node *free;
 };
 
-static struct jesy_node *jesy_find_duplicated_key(struct jesy_parser_context *pacx,
+static struct jesy_node *jesy_find_duplicate_key(struct jesy_parser_context *pacx,
               struct jesy_node *object_node, struct jesy_token *key_token);
 
 static struct jesy_node* jesy_allocate(struct jesy_parser_context *pacx)
@@ -509,10 +519,10 @@ static enum jesy_node_type jesy_get_parent_type(struct jesy_parser_context *pacx
   return JESY_NONE;
 }
 
-static struct jesy_node *jesy_find_duplicated_key(struct jesy_parser_context *pacx,
+static struct jesy_node *jesy_find_duplicate_key(struct jesy_parser_context *pacx,
               struct jesy_node *object_node, struct jesy_token *key_token)
 {
-  struct jesy_node *duplicated = NULL;
+  struct jesy_node *duplicate = NULL;
 
   if (object_node->data.type == JESY_OBJECT)
   {
@@ -522,20 +532,20 @@ static struct jesy_node *jesy_find_duplicated_key(struct jesy_parser_context *pa
       assert(iter->data.type == JESY_KEY);
       if ((iter->data.length == key_token->length) &&
           (memcmp(iter->data.value, &pacx->json_data[key_token->offset], key_token->length) == 0)) {
-        duplicated = iter;
+        duplicate = iter;
       }
       else {
         while (HAS_RIGHT(iter)) {
           iter = jesy_get_right_node(pacx, iter);
           if ((iter->data.length == key_token->length) &&
               (memcmp(iter->data.value, &pacx->json_data[key_token->offset], key_token->length) == 0)) {
-            duplicated = iter;
+            duplicate = iter;
           }
         }
       }
     }
   }
-  return duplicated;
+  return duplicate;
 }
 /*
  *  Parser state machine steps
@@ -556,10 +566,10 @@ static bool jesy_accept(struct jesy_context *ctx,
     printf("\n - [%d] %s, parent:[%d], right:%d, child:%d", pacx->iter - pacx->pool, jesy_node_type_str[pacx->iter->data.type], pacx->iter->parent, pacx->iter->right, pacx->iter->child);
 #endif
     if (node_type == JESY_KEY) {
-#ifdef JESY_OVERWRITE_DUPLICATED_KEYS
-      /* No duplicated keys in the same object are allowed.
+#ifdef JESY_OVERWRITE_DUPLICATE_KEYS
+      /* No duplicate keys in the same object are allowed.
          Only the last key:value will be reported if the keys are duplicated. */
-      struct jesy_node *node = jesy_find_duplicated_key(pacx, pacx->iter, &pacx->token);
+      struct jesy_node *node = jesy_find_duplicate_key(pacx, pacx->iter, &pacx->token);
       if (node) {
         jesy_delete_node(pacx, jesy_get_child_node(pacx, node));
         pacx->iter = node;

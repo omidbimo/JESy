@@ -7,6 +7,8 @@
 #include "jesy.h"
 #include "jesy_util.h"
 
+#define JESY_INVALID_INDEX 0xFFFF
+
 #define UPDATE_TOKEN(tok, type_, offset_, size_) \
   tok.type = type_; \
   tok.offset = offset_; \
@@ -20,10 +22,10 @@
 #define IS_ESCAPE(c) ((c=='\\') || (c=='\"') || (c=='\/') || (c=='\b') || \
                       (c=='\f') || (c=='\n') || (c=='\r') || (c=='\t') || (c == '\u'))
 
-#define HAS_CHILD(node_ptr) (node_ptr->child > -1)
-#define HAS_LEFT(node_ptr) (node_ptr->left > -1)
-#define HAS_RIGHT(node_ptr) (node_ptr->right > -1)
-#define HAS_PARENT(node_ptr) (node_ptr->parent > -1)
+#define HAS_CHILD(node_ptr) (node_ptr->child < JESY_INVALID_INDEX)
+#define HAS_LEFT(node_ptr) (node_ptr->left < JESY_INVALID_INDEX)
+#define HAS_RIGHT(node_ptr) (node_ptr->right < JESY_INVALID_INDEX)
+#define HAS_PARENT(node_ptr) (node_ptr->parent < JESY_INVALID_INDEX)
 
 #define GET_CONTEXT(pacx_)
 #define GET_PARSER_CONTEXT(tnode_)
@@ -55,8 +57,9 @@ enum jesy_parser_state {
   JESY_STATE_STRUCTURE_END,  /* End of object or array structure */
 };
 
-typedef int16_t jesy_node_descriptor;
-
+/* A 16bit node descriptor limits the total number of nodes to 65535.
+   Note that 0xFFFF is used as an invalid node index. */
+typedef uint16_t jesy_node_descriptor;
 
 struct jesy_node {
   jesy_node_descriptor parent;
@@ -66,8 +69,8 @@ struct jesy_node {
   struct jessy_element data;
 };
 
-struct jesy_tree_free_node {
-  struct jesy_tree_free_node *next;
+struct jesy_free_node {
+  struct jesy_free_node *next;
 };
 
 struct jesy_token {
@@ -79,23 +82,34 @@ struct jesy_token {
 struct jesy_parser_context {
   char     *json_data;
   uint32_t  json_size;
+  /* Tokenizer uses this offset to track the consumed characters. */
   uint32_t  offset;
-
-  uint16_t  capacity;
-  uint16_t  allocated;
-  uint16_t  index;
-
-  enum jesy_parser_state state;
+  /* Part of the buffer given by the user at the time of the context initialization.
+   * The buffer will be used to allocate the context structure at first. Then
+   * the remaining will be used as a pool of nodes (max. 65535 nodes).
+   * Actually the pool member points to the memory after context. */
+   struct jesy_node *pool;
+  /* Pool size in bytes. It is limited to 32-bit value which is more than what
+   * most of embedded systems can provide. */
   uint32_t  pool_size;
-  void      *node_pool;
-
+  /* Number of nodes that can be allocated on the given buffer.
+     The value will be clamped to 65535 if the buffer can hold more nodes. */
+  uint16_t  capacity;
+  /* Number of nodes that are already allocated. */
+  uint16_t  allocated;
+  /* Index of the last allocated node */
+  jesy_node_descriptor  index;
+  /* */
+  enum jesy_parser_state state;
+  /* Holds the last token delivered by tokenizer. */
   struct jesy_token token;
-
+  /* Internal node iterator */
   struct jesy_node *iter;
+  /* Holds the main object node */
   struct jesy_node *root;
-  struct jesy_node *pool;
-
-  struct jesy_tree_free_node *free;
+  /* Singly Linked list of freed nodes. This way the deleted nodes can be recycled
+     by the allocator. */
+  struct jesy_free_node *free;
 };
 
 static struct jesy_node *jesy_find_duplicated_key(struct jesy_parser_context *pacx,
@@ -116,10 +130,8 @@ static struct jesy_node* jesy_allocate(struct jesy_parser_context *pacx)
       new_node = &pacx->pool[pacx->index];
       pacx->index++;
     }
-    memset(new_node, 0, sizeof(*new_node));
-    new_node->parent = -1;
-    new_node->child = -1;
-    new_node->right = -1;
+    /* Setting node descriptors to their default values. */
+    memset(new_node, 0xFF, sizeof(jesy_node_descriptor) * 4);
     pacx->allocated++;
   }
 
@@ -128,7 +140,7 @@ static struct jesy_node* jesy_allocate(struct jesy_parser_context *pacx)
 
 static void jesy_free(struct jesy_parser_context *pacx, struct jesy_node *node)
 {
-  struct jesy_tree_free_node *free_node = (struct jesy_tree_free_node*)node;
+  struct jesy_free_node *free_node = (struct jesy_free_node*)node;
 
   assert(node >= pacx->pool);
   assert(node < (pacx->pool + pacx->capacity));
@@ -157,8 +169,8 @@ static struct jesy_node* jesy_get_parent_node(struct jesy_parser_context *pacx,
 }
 
 static struct jesy_node* jesy_get_parent_node_bytype(struct jesy_parser_context *pacx,
-                                                        struct jesy_node *node,
-                                                        enum jesy_node_type type)
+                                                     struct jesy_node *node,
+                                                     enum jesy_node_type type)
 {
   struct jesy_node *parent = NULL;
   /* TODO: add checkings */
@@ -228,11 +240,16 @@ static struct jesy_node* jesy_add_node(struct jesy_parser_context *pacx,
 
       if (HAS_CHILD(node)) {
         struct jesy_node *child = &pacx->pool[node->child];
-        while (HAS_RIGHT(child)) {
-          child = &pacx->pool[child->right];
+
+        if (HAS_LEFT(child)) {
+          struct jesy_node *last = &pacx->pool[child->left];
+          last->right = (jesy_node_descriptor)(new_node - pacx->pool); /* new_node's index */
         }
-        child->right = (jesy_node_descriptor)(new_node - pacx->pool); /* new_node's index */
-        new_node->left = (jesy_node_descriptor)(child - pacx->pool);
+        else {
+          child->right = (jesy_node_descriptor)(new_node - pacx->pool); /* new_node's index */
+          //new_node->left = (jesy_node_descriptor)(child - pacx->pool); /* new_node's index */
+        }
+        child->left = (jesy_node_descriptor)(new_node - pacx->pool); /* new_node's index */
       }
       else {
         node->child = (jesy_node_descriptor)(new_node - pacx->pool); /* new_node's index */
@@ -539,6 +556,7 @@ static bool jesy_accept(struct jesy_context *ctx,
     printf("\n - [%d] %s, parent:[%d], right:%d, child:%d", pacx->iter - pacx->pool, jesy_node_type_str[pacx->iter->data.type], pacx->iter->parent, pacx->iter->right, pacx->iter->child);
 #endif
     if (node_type == JESY_KEY) {
+#ifdef JESY_OVERWRITE_DUPLICATED_KEYS
       /* No duplicated keys in the same object are allowed.
          Only the last key:value will be reported if the keys are duplicated. */
       struct jesy_node *node = jesy_find_duplicated_key(pacx, pacx->iter, &pacx->token);
@@ -546,12 +564,13 @@ static bool jesy_accept(struct jesy_context *ctx,
         jesy_delete_node(pacx, jesy_get_child_node(pacx, node));
         pacx->iter = node;
       }
-      else {
+      else
+#endif
+      {
         struct jesy_node *new_node = NULL;
         new_node = jesy_add_node(pacx, pacx->iter, node_type, pacx->token.offset, pacx->token.length);
         if (!new_node) {
-          /* Allocation is failed. */
-          if (!ctx->status) ctx->status = 5; /* Keep the first error */
+          if (!ctx->status) ctx->status = JESY_ALLOCATION_FAILED; /* Keep the first error */
           return false;
         }
         pacx->iter = new_node;
@@ -567,8 +586,7 @@ static bool jesy_accept(struct jesy_context *ctx,
       struct jesy_node *new_node = NULL;
       new_node = jesy_add_node(pacx, pacx->iter, node_type, pacx->token.offset, pacx->token.length);
       if (!new_node) {
-        /* Allocation is failed. */
-        if (!ctx->status) ctx->status = 5; /* Keep the first error */
+        if (!ctx->status) ctx->status = JESY_ALLOCATION_FAILED; /* Keep the first error */
         return false;
       }
       pacx->iter = new_node;
@@ -621,7 +639,7 @@ static bool jesy_expect(struct jesy_context *ctx,
     return true;
   }
   if (!ctx->status) {
-    ctx->status = 1; /* Keep the first error */
+    ctx->status = JESY_UNEXPECTED_TOKEN; /* Keep the first error */
 #ifndef NDEBUG
   printf("\nJES.Parser error! Unexpected Token. %s \"%.*s\"",
       jesy_token_type_str[ctx->pacx->token.type], ctx->pacx->token.length,
@@ -650,7 +668,10 @@ struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size)
 
   pacx->pool = (struct jesy_node*)(pacx + 1);
   pacx->pool_size = pool_size - (uint32_t)(sizeof(struct jesy_context) + sizeof(struct jesy_parser_context));
-  pacx->capacity = (uint16_t)(pacx->pool_size / sizeof(struct jesy_node));
+  pacx->capacity = (pacx->pool_size / sizeof(struct jesy_node)) < JESY_INVALID_INDEX
+                 ? (uint16_t)(pacx->pool_size / sizeof(struct jesy_node))
+                 : JESY_INVALID_INDEX -1;
+
 #ifndef NDEBUG
   printf("\nallocator capacity is %d nodes", pacx->capacity);
 #endif
@@ -985,4 +1006,12 @@ enum jesy_node_type jesy_get_type(struct jesy_context *ctx, char *key)
     iter = jesy_get_right_node(ctx->pacx, iter);
   }
   return result;
+}
+
+bool jesy_set(struct jesy_context *ctx, char *key, char *value, uint16_t length)
+{
+
+
+
+
 }

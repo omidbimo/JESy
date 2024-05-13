@@ -4,8 +4,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define JESY_OVERWRITE_DUPLICATED_KEYS
+
 struct jesy_parser_context; /* Forward declaration */
-typedef uint32_t jesy_status;
+
+typedef enum jesy_status {
+  JESY_NO_ERR = 0,
+  JESY_PARSING_FAILED,
+  JESY_ALLOCATION_FAILED,
+  JESY_UNEXPECTED_TOKEN,
+} jesy_status;
 
 struct jesy_context {
   jesy_status  status;
@@ -36,8 +44,8 @@ struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size);
 jesy_status jesy_parse(struct jesy_context* ctx, char *json_data, uint32_t json_length);
 jesy_status jesy_serialize(struct jesy_context *ctx, char *json_data, uint32_t length);
 
-struct jessy_element jesy_get_key(struct jesy_context *ctx, char *name);
 void jesy_reset_iterator(struct jesy_context *ctx);
+
 struct jessy_element jesy_get_root(struct jesy_context *ctx);
 struct jessy_element jesy_get_parent(struct jesy_context *ctx);
 struct jessy_element jesy_get_child(struct jesy_context *ctx);
@@ -47,5 +55,7 @@ void jesy_print(struct jesy_context *ctx);
 struct jesy_element jesy_get(struct jesy_context *ctx, char *key);
 bool jesy_find(struct jesy_context *ctx, char *key);
 bool jesy_has(struct jesy_context *ctx, char *key);
+bool jesy_set(struct jesy_context *ctx, char *key, char *value, uint16_t length);
 enum jesy_node_type jesy_get_type(struct jesy_context *ctx, char *key);
+
 #endif

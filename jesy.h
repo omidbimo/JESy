@@ -12,8 +12,6 @@
    */
 #define JESY_OVERWRITE_DUPLICATE_KEYS
 
-struct jesy_parser_context; /* Forward declaration */
-
 typedef enum jesy_status {
   JESY_NO_ERR = 0,
   JESY_PARSING_FAILED,
@@ -21,12 +19,30 @@ typedef enum jesy_status {
   JESY_UNEXPECTED_TOKEN,
 } jesy_status;
 
-struct jesy_context {
-  jesy_status  status;
-  uint32_t    node_count;
-  uint32_t    required_mem;
-  uint32_t    dump_size;
-  struct jesy_parser_context *pacx;
+enum jesy_parser_state {
+  JESY_STATE_START = 0,
+  JESY_STATE_WANT_KEY,
+  JESY_STATE_WANT_VALUE,
+  JESY_STATE_WANT_ARRAY,
+  JESY_STATE_PROPERTY_END,   /* End of key:value pair */
+  JESY_STATE_VALUE_END,      /* End of value inside an array */
+  JESY_STATE_STRUCTURE_END,  /* End of object or array structure */
+};
+
+enum jesy_token_type {
+  JESY_TOKEN_EOF = 0,
+  JESY_TOKEN_OPENING_BRACKET,
+  JESY_TOKEN_CLOSING_BRACKET,
+  JESY_TOKEN_OPENING_BRACE,
+  JESY_TOKEN_CLOSING_BRACE,
+  JESY_TOKEN_STRING,
+  JESY_TOKEN_NUMBER,
+  JESY_TOKEN_BOOLEAN,
+  JESY_TOKEN_NULL,
+  JESY_TOKEN_COLON,
+  JESY_TOKEN_COMMA,
+  JESY_TOKEN_ESC,
+  JESY_TOKEN_INVALID,
 };
 
 enum jesy_node_type {
@@ -44,6 +60,73 @@ struct jessy_element {
   uint16_t type; /* of type enum jesy_node_type */
   uint16_t length;
   char    *value;
+};
+
+/* A 16bit node descriptor limits the total number of nodes to 65535.
+   Note that 0xFFFF is used as an invalid node index. */
+typedef uint16_t jesy_node_descriptor;
+
+struct jesy_free_node {
+  struct jesy_free_node *next;
+};
+
+struct jesy_node {
+  /* Index of the parent node. Each node holds the index of its parent. */
+  jesy_node_descriptor parent;
+  /* Index */
+  jesy_node_descriptor left;
+  /* Index */
+  jesy_node_descriptor right;
+  /* Each parent keeps only the index of its first child. The remaining child nodes
+     will be tracked using the right member of the first child. */
+  jesy_node_descriptor child;
+  /* The data member is a TLV (Type, Length, Value) which value is pointer to the
+     actual value of the node. See jesy.h */
+  struct jessy_element data;
+};
+
+struct jesy_token {
+  enum jesy_token_type type;
+  uint16_t length;
+  uint32_t offset;
+};
+
+struct jesy_context {
+  jesy_status status;
+  /* Number of nodes in the current JSON */
+  uint32_t node_count;
+  /* Memory required to hold a string dump of current JSON */
+  uint32_t dump_size;
+  /* JSON data to be parsed */
+  char     *json_data;
+  /* Length of JSON data in bytes. */
+  uint32_t  json_size;
+  /* Tokenizer uses this offset to track the consumed characters. */
+  uint32_t  offset;
+  /* Part of the buffer given by the user at the time of the context initialization.
+   * The buffer will be used to allocate the context structure at first. Then
+   * the remaining will be used as a pool of nodes (max. 65535 nodes).
+   * Actually the pool member points to the memory after context. */
+   struct jesy_node *pool;
+  /* Pool size in bytes. It is limited to 32-bit value which is more than what
+   * most of embedded systems can provide. */
+  uint32_t  pool_size;
+  /* Number of nodes that can be allocated on the given buffer.
+     The value will be clamped to 65535 if the buffer can hold more nodes. */
+  uint16_t  capacity;
+  /* Index of the last allocated node */
+  jesy_node_descriptor  index;
+  /* */
+  enum jesy_parser_state state;
+  /* Holds the last token delivered by tokenizer. */
+  struct jesy_token token;
+  /* Internal node iterator */
+  struct jesy_node *iter;
+  /* Holds the main object node */
+  struct jesy_node *root;
+  /* Singly Linked list of freed nodes. This way the deleted nodes can be recycled
+     by the allocator. */
+  struct jesy_free_node *free;
 };
 
 struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size);

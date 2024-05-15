@@ -197,7 +197,7 @@ struct jesy_context {
 
 struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size);
 jesy_status jesy_parse(struct jesy_context* ctx, char *json_data, uint32_t json_length);
-uint32_t jesy_serialize(struct jesy_context *ctx, char *dst, uint32_t length);
+uint32_t jesy_render(struct jesy_context *ctx, char *dst, uint32_t length);
 
 void jesy_reset_iterator(struct jesy_context *ctx);
 

@@ -777,7 +777,7 @@ uint32_t jesy_get_dump_size(struct jesy_context *ctx)
   return dump_size;
 }
 
-uint32_t jesy_serialize(struct jesy_context *ctx, char *buffer, uint32_t length)
+uint32_t jesy_render(struct jesy_context *ctx, char *buffer, uint32_t length)
 {
 
   char *dst = buffer;

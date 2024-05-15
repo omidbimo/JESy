@@ -163,8 +163,6 @@ struct jesy_context {
   jesy_status status;
   /* Number of nodes in the current JSON */
   uint32_t node_count;
-  /* Memory required to hold a string dump of current JSON */
-  uint32_t dump_size;
   /* JSON data to be parsed */
   char     *json_data;
   /* Length of JSON data in bytes. */

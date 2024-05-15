@@ -5,7 +5,6 @@
 #include <ctype.h>
 #include <assert.h>
 #include "jesy.h"
-#include "jesy_util.h"
 
 #define JESY_INVALID_INDEX 0xFFFF
 #define JESY_MAX_VALUE_LEN 0xFFFF
@@ -52,7 +51,7 @@ static struct jesy_node* jesy_allocate(struct jesy_context *ctx)
     ctx->node_count++;
   }
   else {
-    ctx->status = JESY_ALLOCATION_FAILED;
+    ctx->status = JESY_OUT_OF_MEMORY;
   }
 
   return new_node;
@@ -708,12 +707,10 @@ jesy_status jesy_parse(struct jesy_context *ctx, char *json_data, uint32_t json_
 
   if (ctx->status == 0) {
     if (ctx->token.type != JESY_TOKEN_EOF) {
-      printf("\nJES.Parser error! Expected EOF, but got: %s", jesy_token_type_str[ctx->token.type]);
-      ctx->status = 100;
+      ctx->status = JESY_UNEXPECTED_TOKEN;
     }
     if (ctx->iter) {
-      printf("\nJES.Parser error! Expected data but got EOF.");
-      ctx->status = 101;
+      ctx->status = JESY_UNEXPECTED_EOF;
     }
   }
 
@@ -721,40 +718,123 @@ jesy_status jesy_parse(struct jesy_context *ctx, char *json_data, uint32_t json_
   return ctx->status;
 }
 
-jesy_status jesy_serialize(struct jesy_context *ctx, char *json_data, uint32_t length)
+uint32_t jesy_get_dump_size(struct jesy_context *ctx)
 {
   struct jesy_node *iter = ctx->root;
-  char *dst = json_data;
-  jesy_status result = 0;
+  uint32_t dump_size = 0;
 
   while (iter) {
-    switch (iter->data.type) {
-      case JESY_OBJECT:
-        *dst++ = '{';
+
+    if (iter->data.type == JESY_OBJECT) {
+      dump_size++;
+    }
+    else if (iter->data.type == JESY_KEY) {
+      dump_size += (iter->data.length + sizeof(char) * 3);
+    }
+    else if (iter->data.type == JESY_VALUE_STRING) {
+      dump_size += (iter->data.length + sizeof(char) * 2);
+    }
+    else if ((iter->data.type == JESY_VALUE_NUMBER)  ||
+             (iter->data.type == JESY_VALUE_BOOLEAN) ||
+             (iter->data.type == JESY_VALUE_NULL)) {
+      dump_size += iter->data.length;
+    }
+    else if (iter->data.type == JESY_ARRAY) {
+      dump_size++;
+    }
+    else {
+      assert(0);
+      return 0;
+    }
+
+    if (HAS_CHILD(iter)) {
+      iter = jesy_get_child_node(ctx, iter);
+      continue;
+    }
+
+    if (iter->data.type == JESY_OBJECT) {
+      dump_size++;
+    }
+
+    else if (iter->data.type == JESY_ARRAY) {
+      dump_size++;
+    }
+
+    if (HAS_RIGHT(iter)) {
+      iter = jesy_get_right_node(ctx, iter);
+      dump_size++;
+      continue;
+    }
+
+    while ((iter = jesy_get_parent_node(ctx, iter))) {
+      if (iter->data.type == JESY_OBJECT) {
+        dump_size++;
+      }
+      else if (iter->data.type == JESY_ARRAY) {
+        dump_size++;
+      }
+      if (HAS_RIGHT(iter)) {
+        iter = jesy_get_right_node(ctx, iter);
+        dump_size++;
         break;
-      case JESY_KEY:
-        *dst++ = '"';
-        dst = (char*)memcpy(dst, iter->data.value, iter->data.length) + iter->data.length;
-        *dst++ = '"';
-        *dst++ = ':';
-        break;
-      case JESY_VALUE_STRING:
-        *dst++ = '"';
-        dst = (char*)memcpy(dst, iter->data.value, iter->data.length) + iter->data.length;
-        *dst++ = '"';
-        break;
-      case JESY_VALUE_NUMBER:
-      case JESY_VALUE_BOOLEAN:
-      case JESY_VALUE_NULL:
-        dst = (char*)memcpy(dst, iter->data.value, iter->data.length) + iter->data.length;
-        break;
-      case JESY_ARRAY:
-        *dst++ = '[';
-        break;
-      default:
-      case JESY_NONE:
-        assert(0);
-        return 1;
+      }
+    }
+  }
+  return dump_size;
+}
+
+uint32_t jesy_serialize(struct jesy_context *ctx, char *buffer, uint32_t length)
+{
+
+  char *dst = buffer;
+  char *end = buffer + length;
+  struct jesy_node *iter = ctx->root;
+  uint32_t required_buffer = 0;
+#if 1
+  if (length < ctx->dump_size) {
+    ctx->status = JESY_OUT_OF_MEMORY;
+    return 0;
+  }
+#else
+  required_buffer = jesy_get_dump_size(ctx);
+  if (required_buffer == 0) {
+    ctx->status = JESY_SERIALIZE_FAILED;
+    return 0;
+  }
+  if (length < required_buffer) {
+    ctx->status = JESY_OUT_OF_MEMORY;
+    return 0;
+  }
+#endif
+
+  while (iter) {
+
+    if (iter->data.type == JESY_OBJECT) {
+      *dst++ = '{';
+    }
+    else if (iter->data.type == JESY_KEY) {
+      *dst++ = '"';
+      dst = (char*)memcpy(dst, iter->data.value, iter->data.length) + iter->data.length;
+      *dst++ = '"';
+      *dst++ = ':';
+    }
+    else if (iter->data.type == JESY_VALUE_STRING) {
+      *dst++ = '"';
+      dst = (char*)memcpy(dst, iter->data.value, iter->data.length) + iter->data.length;
+      *dst++ = '"';
+    }
+    else if ((iter->data.type == JESY_VALUE_NUMBER)  ||
+             (iter->data.type == JESY_VALUE_BOOLEAN) ||
+             (iter->data.type == JESY_VALUE_NULL)) {
+      dst = (char*)memcpy(dst, iter->data.value, iter->data.length) + iter->data.length;
+    }
+    else if (iter->data.type == JESY_ARRAY) {
+      *dst++ = '[';
+    }
+    else {
+      assert(0);
+      ctx->status = JESY_UNEXPECTED_NODE;
+      break;
     }
 
     if (HAS_CHILD(iter)) {
@@ -790,8 +870,8 @@ jesy_status jesy_serialize(struct jesy_context *ctx, char *json_data, uint32_t l
       }
     }
   }
-  *dst = '\0';
-  return result;
+
+  return dst - buffer;
 }
 
 struct jessy_element jesy_get_root(struct jesy_context *ctx)

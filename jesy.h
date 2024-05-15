@@ -4,6 +4,71 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifndef NDEBUG
+  #define JESY_LOG_TOKEN jesy_log_token
+  #define JESY_LOG_NODE  jesy_log_node
+  #define JESY_LOG_MSG   jesy_log_msg
+
+static char jesy_token_type_str[][20] = {
+  "EOF             ",
+  "OPENING_BRACKET ",
+  "CLOSING_BRACKET ",
+  "OPENING_BRACE   ",
+  "CLOSING_BRACE   ",
+  "STRING          ",
+  "NUMBER          ",
+  "BOOLEAN         ",
+  "NULL            ",
+  "COLON           ",
+  "COMMA           ",
+  "ESC             ",
+  "INVALID         ",
+};
+
+static char jesy_node_type_str[][20] = {
+  "NONE",
+  "OBJECT",
+  "KEY",
+  "ARRAY",
+  "VALUE_STRING",
+  "VALUE_NUMBER",
+  "VALUE_BOOLEAN",
+  "VALUE_NULL",
+};
+
+static char jesy_state_str[][20] = {
+  "STATE_START",
+  "STATE_WANT_KEY",
+  "STATE_WANT_VALUE",
+  "STATE_WANT_ARRAY",
+  "STATE_PROPERTY_END",
+  "STATE_VALUE_END",
+  "STATE_STRUCTURE_END",
+};
+
+static inline void jesy_log_token(uint16_t token_type, uint32_t token_pos, uint32_t token_len, uint8_t *token_value)
+{
+  printf("\n JES.Token: [Pos: %5d, Len: %3d] %s \"%.*s\"",
+          token_pos, token_len, jesy_token_type_str[token_type],
+          token_len, token_value);
+}
+
+static inline void jesy_log_node(int16_t node_id, uint32_t node_type, int16_t parent_id, int16_t right_id, int16_t child_id)
+{
+  printf("\n   + JES.Node: [%d] %s, parent:[%d], right:[%d], child:[%d]\n", node_id, jesy_node_type_str[node_type], parent_id, right_id, child_id);
+}
+
+static inline void jesy_log_msg(char *msg)
+{
+  printf(" JSE: %s\n", msg);
+}
+
+#else
+  #define JESY_LOG_TOKEN(...)
+  #define JESY_LOG_NODE(...)
+  #define JESY_LOG_MSG(...)
+#endif
+
 /* Comment or undef to disable searching for duplicate keys and overwriting
    their values if you're sure that there will be no duplicate keys in the
    source JSON.
@@ -15,8 +80,11 @@
 typedef enum jesy_status {
   JESY_NO_ERR = 0,
   JESY_PARSING_FAILED,
-  JESY_ALLOCATION_FAILED,
+  JESY_SERIALIZE_FAILED,
+  JESY_OUT_OF_MEMORY,
   JESY_UNEXPECTED_TOKEN,
+  JESY_UNEXPECTED_NODE,
+  JESY_UNEXPECTED_EOF,
 } jesy_status;
 
 enum jesy_parser_state {
@@ -131,7 +199,7 @@ struct jesy_context {
 
 struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size);
 jesy_status jesy_parse(struct jesy_context* ctx, char *json_data, uint32_t json_length);
-jesy_status jesy_serialize(struct jesy_context *ctx, char *json_data, uint32_t length);
+uint32_t jesy_serialize(struct jesy_context *ctx, char *dst, uint32_t length);
 
 void jesy_reset_iterator(struct jesy_context *ctx);
 
@@ -146,5 +214,5 @@ bool jesy_find(struct jesy_context *ctx, char *key);
 bool jesy_has(struct jesy_context *ctx, char *key);
 bool jesy_set(struct jesy_context *ctx, char *key, char *value, uint16_t length);
 enum jesy_node_type jesy_get_type(struct jesy_context *ctx, char *key);
-
+uint32_t jesy_get_dump_size(struct jesy_context *ctx);
 #endif

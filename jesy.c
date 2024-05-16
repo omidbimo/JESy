@@ -787,19 +787,16 @@ uint32_t jesy_get_dump_size(struct jesy_context *ctx)
 
 uint32_t jesy_render(struct jesy_context *ctx, char *buffer, uint32_t length)
 {
-
   char *dst = buffer;
-  char *end = buffer + length;
   struct jesy_node *iter = ctx->root;
   uint32_t required_buffer = 0;
 
   required_buffer = jesy_get_dump_size(ctx);
-  if (required_buffer == 0) {
-    ctx->status = JESY_SERIALIZE_FAILED;
-    return 0;
-  }
   if (length < required_buffer) {
     ctx->status = JESY_OUT_OF_MEMORY;
+    return 0;
+  }
+  if (required_buffer == 0) {
     return 0;
   }
 

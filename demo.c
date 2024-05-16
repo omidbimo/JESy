@@ -4,162 +4,65 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdint.h>
+#include "Og_Chronometer.h"
 #include "jesy.h"
+  #define POOL_SIZE 0xFFFFFFF
+static char file_data[0xFFFFFFF];
+static uint8_t mem_pool[POOL_SIZE];
+static char output[0xFFFFFFF];
 
-#if 0
-void jesy_print(struct jesy_context *ctx)
+
+struct test_param {
+  struct jesy_context *ctx;
+  void *file_data;
+  size_t file_data_len;
+  uint32_t err;
+};
+
+static int parse_loc(void *param)
 {
-  struct jesy_node *node = ctx->pacx->root;
-  if (!ctx->pacx->root) return;
-  uint32_t idx;
-  for (idx = 0; idx < ctx->pacx->allocated; idx++) {
-    printf("\n    %d. %s,   parent:%d, right:%d, child:%d", idx, jesy_node_type_str[ctx->pacx->pool[idx].data.type],
-      ctx->pacx->pool[idx].parent, ctx->pacx->pool[idx].right, ctx->pacx->pool[idx].child);
+  struct test_param *p = param;
+  uint32_t Idx;
+  for (Idx=0; Idx < 1 && p->err==0; Idx++) {
+    p->ctx = jesy_init_context(mem_pool, sizeof(mem_pool));
+    p->err = jesy_parse(p->ctx, p->file_data, p->file_data_len);
   }
-  return;
-  while (node) {
-
-    if (node->data.type == JESY_NONE) {
-      printf("\nEND! reached a JESY_NONE");
-      break;
-    }
-
-    if (node->data.type == JESY_OBJECT) {
-      printf("\n    { <%s> - @%d", jesy_node_type_str[node->data.type]);
-    } else if (node->data.type == JESY_KEY) {
-      printf("\n        %.*s <%s>: - @%d", node->data.length, node->data.value, jesy_node_type_str[node->data.type]);
-    } else if (node->data.type == JESY_ARRAY) {
-      //printf("\n            %.*s <%s>", node.size, &ctx->json_data[node.offset], jesy_node_type_str[node.type]);
-    } else {
-      printf("\n            %.*s <%s> - @%d", node->data.length, node->data.value, jesy_node_type_str[node->data.type]);
-    }
-
-    if (HAS_CHILD(node)) {
-      node = jesy_get_child_node(ctx->pacx, node);
-      continue;
-    }
-
-    if (HAS_RIGHT(node)) {
-      node = jesy_get_right_node(ctx->pacx, node);
-      continue;
-    }
-
-    while (node = jesy_get_parent_node(ctx->pacx, node)) {
-      if (HAS_RIGHT(node)) {
-        node = jesy_get_right_node(ctx->pacx, node);
-        break;
-      }
-    }
-  }
+  //printf("\n %d", Idx);
+  return 0;
 }
-#endif
 
-#if 0
-
-
-void jesy_print_tree(struct jesy_context *ctx)
+static int serialize_loc(void *param)
 {
-  struct jesy_node *iter = ctx->pacx->root;
-
-  int tabs = 0;
-  int idx;
-      printf("\n");
-  while (iter) {
-    printf("\n ---------->>> [%d] %s,   parent:[%d], right:%d, child:%d\n", iter - ctx->pacx->pool, jesy_node_type_str[iter->data.type],
-      iter->parent, iter->right, iter->child);
-    switch (iter->data.type) {
-      case JESY_OBJECT:
-        //for (idx = 0; idx < tabs; idx++)
-        //{
-        //  *dst++ = '\t';
-        //}
-
-        printf(" {\n");
-        tabs++;
-        break;
-      case JESY_KEY:
-        for (idx = 0; idx < tabs; idx++) printf("\t");
-
-        printf("\"%.*s\":", iter->data.length, iter->data.value);
-        break;
-      case JESY_VALUE_STRING:
-        printf(" \"%.*s\"", iter->data.length, iter->data.value);
-        break;
-      case JESY_VALUE_NUMBER:
-      case JESY_VALUE_BOOLEAN:
-      case JESY_VALUE_NULL:
-        printf(" %.*s", iter->data.length, iter->data.value);
-        break;
-      case JESY_ARRAY:
-        printf("[\n");
-        break;
-      default:
-      case JESY_NONE:
-        printf("\n Serialize error! Node of unexpected type: %d", iter->data.type);
-        return;
-    }
-
-    if (HAS_CHILD(iter)) {
-      iter = jesy_get_child_node(ctx->pacx, iter);
-      continue;
-    }
-
-    if (iter->data.type == JESY_OBJECT) {
-      printf("\n");
-      for (idx = 0; idx < tabs; idx++) printf("\t");
-      printf("} !!!!\n");
-      tabs--;
-    }
-
-    else if (iter->data.type == JESY_ARRAY) {
-      printf("\n");
-      for (idx = 0; idx < tabs; idx++) printf("\t");
-      printf("] ????\n");
-    }
-
-    if (HAS_RIGHT(iter)) {
-      iter = jesy_get_right_node(ctx->pacx, iter);
-      printf(",\n");
-      continue;
-    }
-
-     while (iter = jesy_get_parent_node(ctx->pacx, iter)) {
-      if (iter->data.type == JESY_OBJECT) {
-        printf("\n");
-        for (idx = 0; idx < tabs; idx++) printf("\t");
-        printf("} [%d]", iter - ctx->pacx->pool);
-        tabs--;
-      }
-      else if (iter->data.type == JESY_ARRAY) {
-        printf("\n");
-        for (idx = 0; idx < tabs; idx++) printf("\t");
-        printf("]");
-      }
-      if (HAS_RIGHT(iter)) {
-        printf("\nHAS_RIGHT [%d]", iter - ctx->pacx->pool);
-        iter = jesy_get_right_node(ctx->pacx, iter);
-        printf(",\n");
-        break;
-      }
-    }
-  }
+  struct test_param *p = param;
+  int32_t err;
+  p->file_data_len = jesy_render(p->ctx, output, sizeof(output));
+  err = p->ctx->status;
+  return err;
 }
-#endif
+
+static int init(void *param)
+{
+  struct test_param *p = param;
+  p->ctx = jesy_init_context(mem_pool, sizeof(mem_pool));
+  return 0;
+}
+
 int main(void)
 {
-  #define POOL_SIZE 0x4FFFF
+
   struct jesy_context *ctx;
   FILE *fp;
-  char file_data[0x4FFFF];
-  uint8_t mem_pool[POOL_SIZE];
-  char output[0x4FFFF];
+  size_t out_size;
   jesy_status err;
   //printf("\nSize of jesy_context: %d bytes", sizeof(struct jesy_context));
   //printf("\nSize of jesy_parser_context: %d bytes", sizeof(struct jesy_parser_context));
   //printf("\nSize of jesy_node: %d bytes", sizeof(struct jesy_node));
 
-
-  fp = fopen("test.soc", "rb");
+#if 0
+  fp = fopen("test.json", "rb");
+#else
+  fp = fopen("large.json", "rb");
+#endif
 
   if (fp != NULL) {
     fread(file_data, sizeof(char), sizeof(file_data), fp);
@@ -175,28 +78,36 @@ int main(void)
   if (!ctx) {
     printf("\n Context init failed!");
   }
-  printf("\n JESy: Start parsing...");
-  if (0 == (err = jesy_parse(ctx, file_data, sizeof(file_data)))) {
-    printf("\n JESy: Parsing end!");
-    printf("\nSize of JSON data: %lld bytes", strnlen(file_data, sizeof(file_data)));
-    //printf("\nMemory required: %d bytes for %d elements.", ctx->node_count*sizeof(struct jesy_node), ctx->node_count);
+    timeit_result bm;
+    struct test_param param;
+    param.ctx = ctx;
+    param.file_data = file_data;
+    param.file_data_len = sizeof(file_data);
+    param.err = 0;
+    bm = timeit(NULL, NULL, 0, NULL, NULL, NULL, NULL);
+    printf("\n CPU tick: %d Hz, %f uS\n", bm.tick_freq, bm.tick_time_us);
 
-    //jesy_print(ctx);
-    jesy_serialize(ctx, output, sizeof(output));
+    printf("\n JESy: Start parsing...");
+    bm = timeit(parse_loc, &param, 1, init, &param, NULL, NULL);
+    printf("\n Error: %d", param.err);
+    printf("\n    min: %.3f ms, %ld ticks | avg: %.3f ms, %ld ticks | max: %.3f ms, %ld ticks\n",
+            bm.min_time * 1000, bm.min_ticks, bm.avg_time * 1000, bm.avg_ticks, bm.max_time * 1000, bm.max_ticks);
+    printf("\n      Size of JSON data: %lld bytes", strnlen(file_data, sizeof(file_data)));
+    printf("\n      JESy node count: %d", ctx->node_count);
+
+    printf("\n JESy: Start serializing...");
+    bm = timeit(serialize_loc, &param, 1, NULL, NULL, NULL, NULL);
+    printf("\n Error: %d", bm.err);
+    printf("\n    min: %.3f ms, %ld ticks | avg: %.3f ms, %ld ticks | max: %.3f ms, %ld ticks\n",
+            bm.min_time * 1000, bm.min_ticks, bm.avg_time * 1000, bm.avg_ticks, bm.max_time * 1000, bm.max_ticks);
+    //out_size = strlen(output);
     //printf("\n\n%s", output);
-
-    //jesy_reset_iterator(ctx);
-    printf("\nHas \"StcRevData\": %s", jesy_find(ctx, "StcRevData") ? "True" : "False");
-    printf("\nHas \"devData\": %s", jesy_find(ctx, "devData") ? "True" : "False");
-    printf("\nHas \"MacId\": %s", jesy_find(ctx, "MacId") ? "True" : "False");
-    printf("\nType: \"devData\": %d", jesy_get_type(ctx, "devData"));
-    printf("\nType: \"IOs\": %d", jesy_get_type(ctx, "IOs"));
-
-    //jesy_print_tree(ctx);
-    printf("\nJSON length: %lld", strlen(output));
-  }
-  else {
-    printf("\nFAILED, %d", err);
-  }
+    out_size = param.file_data_len;
+    fp = fopen("result.json", "wb");
+    printf("\n Size of JSON dump:  %d bytes",  out_size);
+    if (fp != NULL) {
+      fwrite(output, sizeof(char), out_size, fp);
+      fclose(fp);
+    }
   return 0;
 }

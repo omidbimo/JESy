@@ -77,6 +77,8 @@ static inline void jesy_log_msg(char *msg)
    */
 #define JESY_OVERWRITE_DUPLICATE_KEYS
 
+//#define JESY_32BIT_NODE_DESCRIPTOR
+
 typedef enum jesy_status {
   JESY_NO_ERR = 0,
   JESY_PARSING_FAILED,
@@ -130,9 +132,15 @@ struct jessy_element {
   char    *value;
 };
 
+#ifdef JESY_32BIT_NODE_DESCRIPTOR
+/* A 32bit node descriptor limits the total number of nodes to 4294967295.
+   Note that 0xFFFFFFFF is used as an invalid node index. */
+typedef uint32_t jesy_node_descriptor;
+#else
 /* A 16bit node descriptor limits the total number of nodes to 65535.
    Note that 0xFFFF is used as an invalid node index. */
 typedef uint16_t jesy_node_descriptor;
+#endif
 
 struct jesy_free_node {
   struct jesy_free_node *next;
@@ -177,9 +185,9 @@ struct jesy_context {
   /* Pool size in bytes. It is limited to 32-bit value which is more than what
    * most of embedded systems can provide. */
   uint32_t  pool_size;
-  /* Number of nodes that can be allocated on the given buffer.
-     The value will be clamped to 65535 if the buffer can hold more nodes. */
-  uint16_t  capacity;
+  /* Number of nodes that can be allocated on the given buffer. The value will
+     be limited to 65535 in case of 16-bit node descriptors. */
+  uint32_t  capacity;
   /* Index of the last allocated node */
   jesy_node_descriptor  index;
   /* */

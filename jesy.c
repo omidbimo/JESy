@@ -6,8 +6,13 @@
 #include <assert.h>
 #include "jesy.h"
 
-#define JESY_INVALID_INDEX 0xFFFF
-#define JESY_MAX_VALUE_LEN 0xFFFF
+#ifdef JESY_32BIT_NODE_DESCRIPTOR
+  #define JESY_INVALID_INDEX 0xFFFFFFFF
+  #define JESY_MAX_VALUE_LEN 0xFFFFFFFF
+#else
+  #define JESY_INVALID_INDEX 0xFFFF
+  #define JESY_MAX_VALUE_LEN 0xFFFF
+#endif
 
 #define UPDATE_TOKEN(tok, type_, offset_, size_) \
   tok.type = type_; \
@@ -584,9 +589,9 @@ struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size)
   ctx->offset = (uint32_t)-1;
   ctx->index = 0;
   ctx->pool = (struct jesy_node*)(ctx + 1);
-  ctx->pool_size = pool_size - (uint32_t)(sizeof(struct jesy_context) + sizeof(struct jesy_context));
+  ctx->pool_size = pool_size - (uint32_t)(sizeof(struct jesy_context));
   ctx->capacity = (ctx->pool_size / sizeof(struct jesy_node)) < JESY_INVALID_INDEX
-                 ? (uint16_t)(ctx->pool_size / sizeof(struct jesy_node))
+                 ? (jesy_node_descriptor)(ctx->pool_size / sizeof(struct jesy_node))
                  : JESY_INVALID_INDEX -1;
 
   ctx->iter = NULL;

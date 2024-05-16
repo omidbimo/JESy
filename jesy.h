@@ -160,7 +160,7 @@ struct jesy_token {
 };
 
 struct jesy_context {
-  jesy_status status;
+  uint32_t status;
   /* Number of nodes in the current JSON */
   uint32_t node_count;
   /* JSON data to be parsed */
@@ -196,7 +196,7 @@ struct jesy_context {
 };
 
 struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size);
-jesy_status jesy_parse(struct jesy_context* ctx, char *json_data, uint32_t json_length);
+uint32_t jesy_parse(struct jesy_context* ctx, char *json_data, uint32_t json_length);
 uint32_t jesy_render(struct jesy_context *ctx, char *dst, uint32_t length);
 
 void jesy_reset_iterator(struct jesy_context *ctx);

@@ -82,7 +82,7 @@ static inline void jesy_log_msg(char *msg)
 typedef enum jesy_status {
   JESY_NO_ERR = 0,
   JESY_PARSING_FAILED,
-  JESY_SERIALIZE_FAILED,
+  JESY_RENDER_FAILED,
   JESY_OUT_OF_MEMORY,
   JESY_UNEXPECTED_TOKEN,
   JESY_UNEXPECTED_NODE,
@@ -126,7 +126,7 @@ enum jesy_node_type {
   JESY_VALUE_NULL,
 };
 
-struct jessy_element {
+struct jesy_element {
   uint16_t type; /* of type enum jesy_node_type */
   uint16_t length;
   char    *value;
@@ -158,7 +158,7 @@ struct jesy_node {
   jesy_node_descriptor child;
   /* The data member is a TLV (Type, Length, Value) which value is pointer to the
      actual value of the node. See jesy.h */
-  struct jessy_element data;
+  struct jesy_element data;
 };
 
 struct jesy_token {
@@ -209,13 +209,13 @@ uint32_t jesy_render(struct jesy_context *ctx, char *dst, uint32_t length);
 
 void jesy_reset_iterator(struct jesy_context *ctx);
 
-struct jessy_element jesy_get_root(struct jesy_context *ctx);
-struct jessy_element jesy_get_parent(struct jesy_context *ctx);
-struct jessy_element jesy_get_child(struct jesy_context *ctx);
-struct jessy_element jesy_get_next(struct jesy_context *ctx);
+struct jesy_element jesy_get_root(struct jesy_context *ctx);
+struct jesy_element jesy_get_parent(struct jesy_context *ctx);
+struct jesy_element jesy_get_child(struct jesy_context *ctx);
+struct jesy_element jesy_get_next(struct jesy_context *ctx);
 void jesy_print(struct jesy_context *ctx);
 
-struct jesy_element jesy_get(struct jesy_context *ctx, char *key);
+struct jesy_element* jesy_get(struct jesy_context *ctx, char *key);
 bool jesy_find(struct jesy_context *ctx, char *key);
 bool jesy_has(struct jesy_context *ctx, char *key);
 bool jesy_set(struct jesy_context *ctx, char *key, char *value, uint16_t length);

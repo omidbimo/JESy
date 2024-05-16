@@ -54,11 +54,12 @@ int main(void)
   FILE *fp;
   size_t out_size;
   jesy_status err;
+  struct jesy_element *element;
   //printf("\nSize of jesy_context: %d bytes", sizeof(struct jesy_context));
   //printf("\nSize of jesy_parser_context: %d bytes", sizeof(struct jesy_parser_context));
   //printf("\nSize of jesy_node: %d bytes", sizeof(struct jesy_node));
 
-#if 0
+#if 1
   fp = fopen("test.json", "rb");
 #else
   fp = fopen("large.json", "rb");
@@ -109,5 +110,10 @@ int main(void)
       fwrite(output, sizeof(char), out_size, fp);
       fclose(fp);
     }
+
+  element = jesy_get(ctx, "a");
+  if (element) {
+    printf("\n \"a\": %.*s", element->length, element->value);
+  }
   return 0;
 }

@@ -886,21 +886,22 @@ struct jesy_element* jesy_get_root(struct jesy_context *ctx)
 static struct jesy_node* get_node_from_element(struct jesy_context *ctx, struct jesy_element *element)
 {
   assert(ctx);
-  if (element != NULL) {
-    struct jesy_node *node = ((struct jesy_node*)((char*)(element) -  offsetof(struct jesy_node, data)));
-    if ((node >= ctx->pool) &&
-        ((((void*)node - (void*)ctx->pool) % sizeof(*node)) == 0) &&
-        ((node >= ctx->pool) < ctx->capacity)) {
-      return node;
-    }
+  assert(element);
+
+  struct jesy_node *node = ((struct jesy_node*)((char*)(element) -  offsetof(struct jesy_node, data)));
+  if ((node >= ctx->pool) &&
+      ((((void*)node - (void*)ctx->pool) % sizeof(*node)) == 0) &&
+      ((node >= ctx->pool) < ctx->capacity)) {
+    return node;
   }
+
   return NULL;
 }
 
 struct jesy_element* jesy_get_parent(struct jesy_context *ctx, struct jesy_element *element)
 {
   struct jesy_node* node;
-  if (ctx) {
+  if (ctx && element) {
     node = get_node_from_element(ctx, element);
     if (node && HAS_PARENT(node)) {
       return &ctx->pool[node->parent].data;
@@ -912,7 +913,7 @@ struct jesy_element* jesy_get_parent(struct jesy_context *ctx, struct jesy_eleme
 struct jesy_element* jesy_get_child(struct jesy_context *ctx, struct jesy_element *element)
 {
   struct jesy_node* node;
-  if (ctx) {
+  if (ctx && element) {
     node = get_node_from_element(ctx, element);
     if (node && HAS_CHILD(node)) {
       return &ctx->pool[node->child].data;
@@ -921,11 +922,14 @@ struct jesy_element* jesy_get_child(struct jesy_context *ctx, struct jesy_elemen
   return NULL;
 }
 
-struct jesy_element* jesy_get_next(struct jesy_context *ctx, struct jesy_element *element)
+struct jesy_element* jesy_get_right(struct jesy_context *ctx, struct jesy_element *element)
 {
-  if ((ctx) && HAS_RIGHT(ctx->iter)) {
-    ctx->iter = &ctx->pool[ctx->iter->right];
-    return &ctx->iter->data;
+  struct jesy_node* node;
+  if (ctx && element) {
+    node = get_node_from_element(ctx, element);
+    if (node && HAS_RIGHT(node)) {
+      return &ctx->pool[node->right].data;
+    }
   }
   return NULL;
 }

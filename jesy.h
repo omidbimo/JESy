@@ -158,7 +158,7 @@ void jesy_reset_iterator(struct jesy_context *ctx);
 struct jesy_element* jesy_get_root(struct jesy_context *ctx);
 struct jesy_element* jesy_get_parent(struct jesy_context *ctx, struct jesy_element *element);
 struct jesy_element* jesy_get_child(struct jesy_context *ctx, struct jesy_element *element);
-struct jesy_element* jesy_get_next(struct jesy_context *ctx, struct jesy_element *element);
+struct jesy_element* jesy_get_right(struct jesy_context *ctx, struct jesy_element *element);
 void jesy_print(struct jesy_context *ctx);
 
 struct jesy_element* jesy_get(struct jesy_context *ctx, struct jesy_element *object, char *key);
@@ -169,7 +169,7 @@ enum jesy_node_type jesy_get_type(struct jesy_context *ctx, char *key);
 uint32_t jesy_get_dump_size(struct jesy_context *ctx);
 
 
-#define JESY_ARRAY_FOR_EACH(ctx, element) for(element = (element->type == JESY_ARRAY) ? jesy_get_child(ctx, element) : NULL; element != NULL; element = jesy_get_child(ctx, element))
+#define JESY_ARRAY_FOR_EACH(ctx, element) for(element = (element->type == JESY_ARRAY) ? jesy_get_child(ctx, element) : NULL; element != NULL; element = jesy_get_right(ctx, element))
 
 
 

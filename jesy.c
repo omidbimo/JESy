@@ -6,7 +6,7 @@
 #include <assert.h>
 #include "jesy.h"
 
-#ifdef JESY_32BIT_NODE_DESCRIPTOR
+#ifdef JESY_USE_32BIT_NODE_DESCRIPTOR
   #define JESY_INVALID_INDEX 0xFFFFFFFF
   #define JESY_MAX_VALUE_LEN 0xFFFFFFFF
 #else
@@ -874,40 +874,60 @@ static uint32_t jesy_get_user_key_len(char *key)
   return (uint16_t)strnlen(key, 0xFFFF);
 }
 
-struct jesy_element jesy_get_root(struct jesy_context *ctx)
+struct jesy_element* jesy_get_root(struct jesy_context *ctx)
 {
   if (ctx) {
     ctx->iter = ctx->root;
-    return ctx->iter->data;
+    return &ctx->iter->data;
   }
-  return (struct jesy_element){ 0 };
+  return NULL;
 }
 
-struct jesy_element jesy_get_parent(struct jesy_context *ctx)
+static struct jesy_node* get_node_from_element(struct jesy_context *ctx, struct jesy_element *element)
 {
-  if ((ctx) && HAS_PARENT(ctx->iter)) {
-    ctx->iter = &ctx->pool[ctx->iter->parent];
-    return ctx->iter->data;
+  assert(ctx);
+  if (element != NULL) {
+    struct jesy_node *node = ((struct jesy_node*)((char*)(element) -  offsetof(struct jesy_node, data)));
+    if ((node >= ctx->pool) &&
+        ((((void*)node - (void*)ctx->pool) % sizeof(*node)) == 0) &&
+        ((node >= ctx->pool) < ctx->capacity)) {
+      return node;
+    }
   }
-  return (struct jesy_element){ 0 };
+  return NULL;
 }
 
-struct jesy_element jesy_get_child(struct jesy_context *ctx)
+struct jesy_element* jesy_get_parent(struct jesy_context *ctx, struct jesy_element *element)
 {
-  if ((ctx) && HAS_CHILD(ctx->iter)) {
-    ctx->iter = &ctx->pool[ctx->iter->child];
-    return ctx->iter->data;
+  struct jesy_node* node;
+  if (ctx) {
+    node = get_node_from_element(ctx, element);
+    if (node && HAS_PARENT(node)) {
+      return &ctx->pool[node->parent].data;
+    }
   }
-  return (struct jesy_element){ 0 };
+  return NULL;
 }
 
-struct jesy_element jesy_get_next(struct jesy_context *ctx)
+struct jesy_element* jesy_get_child(struct jesy_context *ctx, struct jesy_element *element)
+{
+  struct jesy_node* node;
+  if (ctx) {
+    node = get_node_from_element(ctx, element);
+    if (node && HAS_CHILD(node)) {
+      return &ctx->pool[node->child].data;
+    }
+  }
+  return NULL;
+}
+
+struct jesy_element* jesy_get_next(struct jesy_context *ctx, struct jesy_element *element)
 {
   if ((ctx) && HAS_RIGHT(ctx->iter)) {
     ctx->iter = &ctx->pool[ctx->iter->right];
-    return ctx->iter->data;
+    return &ctx->iter->data;
   }
-  return (struct jesy_element){ 0 };
+  return NULL;
 }
 
 void jesy_reset_iterator(struct jesy_context *ctx)
@@ -915,7 +935,7 @@ void jesy_reset_iterator(struct jesy_context *ctx)
   ctx->iter = ctx->root;
 }
 
-bool jesy_find(struct jesy_context *ctx, char *key)
+bool jesy_find(struct jesy_context *ctx, struct jesy_element *element, char *key)
 {
   bool result = false;
   struct jesy_node *iter = ctx->iter;
@@ -946,7 +966,7 @@ bool jesy_find(struct jesy_context *ctx, char *key)
   return result;
 }
 
-bool jesy_has(struct jesy_context *ctx, char *key)
+bool jesy_has(struct jesy_context *ctx, struct jesy_element *element, char *key)
 {
   bool result = false;
   struct jesy_node *iter = ctx->iter;
@@ -1009,9 +1029,9 @@ enum jesy_node_type jesy_get_type(struct jesy_context *ctx, char *key)
   return result;
 }
 
-struct jesy_element* jesy_get(struct jesy_context *ctx, char *key)
+struct jesy_element* jesy_get(struct jesy_context *ctx, struct jesy_element *element, char *key)
 {
-  if (jesy_find(ctx, key)) {
+  if (jesy_find(ctx, element, key)) {
     return &jesy_get_child_node(ctx, ctx->iter)->data;
   }
   return NULL;

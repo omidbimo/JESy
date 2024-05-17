@@ -5,64 +5,10 @@
 #include <stdint.h>
 
 #ifndef NDEBUG
+  #include "jesy_util.h"
   #define JESY_LOG_TOKEN jesy_log_token
   #define JESY_LOG_NODE  jesy_log_node
   #define JESY_LOG_MSG   jesy_log_msg
-
-static char jesy_token_type_str[][20] = {
-  "EOF             ",
-  "OPENING_BRACKET ",
-  "CLOSING_BRACKET ",
-  "OPENING_BRACE   ",
-  "CLOSING_BRACE   ",
-  "STRING          ",
-  "NUMBER          ",
-  "BOOLEAN         ",
-  "NULL            ",
-  "COLON           ",
-  "COMMA           ",
-  "ESC             ",
-  "INVALID         ",
-};
-
-static char jesy_node_type_str[][20] = {
-  "NONE",
-  "OBJECT",
-  "KEY",
-  "ARRAY",
-  "VALUE_STRING",
-  "VALUE_NUMBER",
-  "VALUE_BOOLEAN",
-  "VALUE_NULL",
-};
-
-static char jesy_state_str[][20] = {
-  "STATE_START",
-  "STATE_WANT_KEY",
-  "STATE_WANT_VALUE",
-  "STATE_WANT_ARRAY",
-  "STATE_PROPERTY_END",
-  "STATE_VALUE_END",
-  "STATE_STRUCTURE_END",
-};
-
-static inline void jesy_log_token(uint16_t token_type, uint32_t token_pos, uint32_t token_len, uint8_t *token_value)
-{
-  printf("\n JES.Token: [Pos: %5d, Len: %3d] %s \"%.*s\"",
-          token_pos, token_len, jesy_token_type_str[token_type],
-          token_len, token_value);
-}
-
-static inline void jesy_log_node(int16_t node_id, uint32_t node_type, int16_t parent_id, int16_t right_id, int16_t child_id)
-{
-  printf("\n   + JES.Node: [%d] %s, parent:[%d], right:[%d], child:[%d]\n", node_id, jesy_node_type_str[node_type], parent_id, right_id, child_id);
-}
-
-static inline void jesy_log_msg(char *msg)
-{
-  printf(" JSE: %s\n", msg);
-}
-
 #else
   #define JESY_LOG_TOKEN(...)
   #define JESY_LOG_NODE(...)
@@ -77,7 +23,7 @@ static inline void jesy_log_msg(char *msg)
    */
 #define JESY_OVERWRITE_DUPLICATE_KEYS
 
-//#define JESY_32BIT_NODE_DESCRIPTOR
+//#define JESY_USE_32BIT_NODE_DESCRIPTOR
 
 typedef enum jesy_status {
   JESY_NO_ERR = 0,
@@ -132,7 +78,7 @@ struct jesy_element {
   char    *value;
 };
 
-#ifdef JESY_32BIT_NODE_DESCRIPTOR
+#ifdef JESY_USE_32BIT_NODE_DESCRIPTOR
 /* A 32bit node descriptor limits the total number of nodes to 4294967295.
    Note that 0xFFFFFFFF is used as an invalid node index. */
 typedef uint32_t jesy_node_descriptor;
@@ -209,16 +155,22 @@ uint32_t jesy_render(struct jesy_context *ctx, char *dst, uint32_t length);
 
 void jesy_reset_iterator(struct jesy_context *ctx);
 
-struct jesy_element jesy_get_root(struct jesy_context *ctx);
-struct jesy_element jesy_get_parent(struct jesy_context *ctx);
-struct jesy_element jesy_get_child(struct jesy_context *ctx);
-struct jesy_element jesy_get_next(struct jesy_context *ctx);
+struct jesy_element* jesy_get_root(struct jesy_context *ctx);
+struct jesy_element* jesy_get_parent(struct jesy_context *ctx, struct jesy_element *element);
+struct jesy_element* jesy_get_child(struct jesy_context *ctx, struct jesy_element *element);
+struct jesy_element* jesy_get_next(struct jesy_context *ctx, struct jesy_element *element);
 void jesy_print(struct jesy_context *ctx);
 
-struct jesy_element* jesy_get(struct jesy_context *ctx, char *key);
-bool jesy_find(struct jesy_context *ctx, char *key);
-bool jesy_has(struct jesy_context *ctx, char *key);
+struct jesy_element* jesy_get(struct jesy_context *ctx, struct jesy_element *object, char *key);
+bool jesy_find(struct jesy_context *ctx, struct jesy_element *object, char *key);
+bool jesy_has(struct jesy_context *ctx, struct jesy_element *object, char *key);
 bool jesy_set(struct jesy_context *ctx, char *key, char *value, uint16_t length);
 enum jesy_node_type jesy_get_type(struct jesy_context *ctx, char *key);
 uint32_t jesy_get_dump_size(struct jesy_context *ctx);
+
+
+#define JESY_ARRAY_FOR_EACH(ctx, element) for(element = (element->type == JESY_ARRAY) ? jesy_get_child(ctx, element) : NULL; element != NULL; element = jesy_get_child(ctx, element))
+
+
+
 #endif

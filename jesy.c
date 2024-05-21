@@ -214,8 +214,8 @@ static void jesy_delete_node(struct jesy_context *ctx, struct jesy_node *node)
 
       break;
     }
-    if (prev)prev->right = -1;
-    if (parent)parent->child = -1;
+    if (prev) { prev->right = JESY_INVALID_INDEX; }
+    if (parent) { parent->child = JESY_INVALID_INDEX; }
     if (ctx->root == iter) {
       ctx->root = NULL;
     }
@@ -372,47 +372,27 @@ static struct jesy_token jesy_get_token(struct jesy_context *ctx)
 
     } else if (token.type == JESY_TOKEN_BOOLEAN) {
       token.length++;
-      /* Look ahead to find symbols signaling the end of token. */
-      if ((LOOK_AHEAD(ctx) == ',') ||
-          (LOOK_AHEAD(ctx) == ']') ||
-          (LOOK_AHEAD(ctx) == '}') ||
-          (IS_SPACE(LOOK_AHEAD(ctx)))) {
-        /* Check against "true". Use the longer string as reference. */
-        uint32_t compare_size = token.length > sizeof("true") - 1
-                              ? token.length
-                              : sizeof("true") - 1;
-        if (memcmp("true", &ctx->json_data[token.offset], compare_size) == 0) {
-          break;
+      if ((token.length == (sizeof("true") - 1)) &&
+          (0 == (strncmp(&ctx->json_data[token.offset], "true", (sizeof("true") - 1))))) {
+        break;
+      }
+
+      if (token.length == (sizeof("false") - 1)) {
+        if (0 != (strncmp(&ctx->json_data[token.offset], "false", (sizeof("false") - 1)))) {
+          token.type = JESY_TOKEN_INVALID;
         }
-        /* Check against "false". Use the longer string as reference. */
-        compare_size = token.length > sizeof("false") - 1
-                     ? token.length
-                     : sizeof("false") - 1;
-        if (memcmp("false", &ctx->json_data[token.offset], compare_size) == 0) {
-          break;
-        }
-        /* The token is neither true nor false. */
-        token.type = JESY_TOKEN_INVALID;
         break;
       }
       continue;
-    } else if (token.type == JESY_TOKEN_NULL) {
+    }
+    else if (token.type == JESY_TOKEN_NULL) {
       token.length++;
-      /* Look ahead to find symbols signaling the end of token. */
-      if ((LOOK_AHEAD(ctx) == ',') ||
-          (LOOK_AHEAD(ctx) == ']') ||
-          (LOOK_AHEAD(ctx) == '}') ||
-          (IS_SPACE(LOOK_AHEAD(ctx)))) {
-        /* Check against "null". Use the longer string as reference. */
-        uint32_t compare_size = token.length > sizeof("null") - 1
-                              ? token.length
-                              : sizeof("null") - 1;
-        if (memcmp("null", &ctx->json_data[token.offset], compare_size) == 0) {
+        if (token.length == (sizeof("null") - 1)) {
+          if (0 != (strncmp(&ctx->json_data[token.offset], "null", (sizeof("null") - 1)))) {
+            token.type = JESY_TOKEN_INVALID;
+          }
           break;
         }
-        token.type = JESY_TOKEN_INVALID;
-        break;
-      }
       continue;
     }
 

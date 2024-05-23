@@ -228,9 +228,8 @@ static struct jesy_token jesy_get_token(struct jesy_context *ctx)
 
   while (true) {
 
-    if (++ctx->offset >= ctx->json_size) {
-      /* End of buffer.
-         If there is a token in process, mark it as invalid. */
+    if ((++ctx->offset >= ctx->json_size) || (ctx->json_data[ctx->offset] == '\0')) {
+      /* End of data. If token is incomplete, mark it as invalid. */
       if (token.type) {
         token.type = JESY_TOKEN_INVALID;
       }
@@ -240,11 +239,6 @@ static struct jesy_token jesy_get_token(struct jesy_context *ctx)
     char ch = ctx->json_data[ctx->offset];
 
     if (!token.type) {
-      /* Reaching the end of the string. Deliver the last type detected. */
-      if (ch == '\0') {
-        token.offset = ctx->offset;
-        break;
-      }
 
       if (ch == '{') {
         UPDATE_TOKEN(token, JESY_TOKEN_OPENING_BRACKET, ctx->offset, 1);
@@ -277,12 +271,8 @@ static struct jesy_token jesy_get_token(struct jesy_context *ctx)
       }
 
       if (ch == '\"') {
-        /* Use the jesy_token_type_str offset since '\"' won't be a part of token. */
+        /* Use offset of next symbol since '\"' won't be a part of token. */
         UPDATE_TOKEN(token, JESY_TOKEN_STRING, ctx->offset + 1, 0);
-        if (IS_EOF_AHEAD(ctx)) {
-          UPDATE_TOKEN(token, JESY_TOKEN_INVALID, ctx->offset, 1);
-          break;
-        }
         continue;
       }
 
@@ -310,12 +300,13 @@ static struct jesy_token jesy_get_token(struct jesy_context *ctx)
         break;
       }
 
-      if ((ch == 't') || (ch == 'f')) {
-        if ((LOOK_AHEAD(ctx) < 'a') || (LOOK_AHEAD(ctx) > 'z')) {
-          UPDATE_TOKEN(token, JESY_TOKEN_INVALID, ctx->offset, 1);
-          break;
-        }
-        UPDATE_TOKEN(token, JESY_TOKEN_BOOLEAN, ctx->offset, 1);
+      if (ch == 't') {
+        UPDATE_TOKEN(token, JESY_TOKEN_TRUE, ctx->offset, 1);
+        continue;
+      }
+
+      if (ch == 'f') {
+        UPDATE_TOKEN(token, JESY_TOKEN_FALSE, ctx->offset, 1);
         continue;
       }
 
@@ -366,14 +357,19 @@ static struct jesy_token jesy_get_token(struct jesy_context *ctx)
 
       token.type = JESY_TOKEN_INVALID;
       break;
-
-    } else if (token.type == JESY_TOKEN_BOOLEAN) {
+    }
+    else if (token.type == JESY_TOKEN_TRUE) {
       token.length++;
-      if ((token.length == (sizeof("true") - 1)) &&
-          (0 == (strncmp(&ctx->json_data[token.offset], "true", (sizeof("true") - 1))))) {
+      if (token.length == (sizeof("true") - 1)) {
+        if (0 != (strncmp(&ctx->json_data[token.offset], "true", (sizeof("true") - 1)))) {
+          token.type = JESY_TOKEN_INVALID;
+        }
         break;
       }
-
+      continue;
+    }
+    else if (token.type == JESY_TOKEN_FALSE) {
+      token.length++;
       if (token.length == (sizeof("false") - 1)) {
         if (0 != (strncmp(&ctx->json_data[token.offset], "false", (sizeof("false") - 1)))) {
           token.type = JESY_TOKEN_INVALID;
@@ -384,12 +380,12 @@ static struct jesy_token jesy_get_token(struct jesy_context *ctx)
     }
     else if (token.type == JESY_TOKEN_NULL) {
       token.length++;
-        if (token.length == (sizeof("null") - 1)) {
-          if (0 != (strncmp(&ctx->json_data[token.offset], "null", (sizeof("null") - 1)))) {
-            token.type = JESY_TOKEN_INVALID;
-          }
-          break;
+      if (token.length == (sizeof("null") - 1)) {
+        if (0 != (strncmp(&ctx->json_data[token.offset], "null", (sizeof("null") - 1)))) {
+          token.type = JESY_TOKEN_INVALID;
         }
+        break;
+      }
       continue;
     }
 
@@ -465,7 +461,8 @@ static bool jesy_accept(struct jesy_context *ctx,
       new_node = jesy_add_element(ctx, ctx->iter, element_type, ctx->token.offset, ctx->token.length);
     }
     else if ((element_type == JESY_NUMBER)  ||
-             (element_type == JESY_BOOLEAN) ||
+             (element_type == JESY_TRUE)    ||
+             (element_type == JESY_FALSE)   ||
              (element_type == JESY_NULL)) {
       new_node = jesy_add_element(ctx, ctx->iter, element_type, ctx->token.offset, ctx->token.length);
     }
@@ -602,7 +599,8 @@ uint32_t jesy_parse(struct jesy_context *ctx, char *json_data, uint32_t json_len
       case JESY_STATE_WANT_VALUE:
         if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_STRING, JESY_STATE_PROPERTY_END)   ||
             jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_NUMBER, JESY_STATE_PROPERTY_END)   ||
-            jesy_accept(ctx, JESY_TOKEN_BOOLEAN, JESY_BOOLEAN, JESY_STATE_PROPERTY_END) ||
+            jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_TRUE, JESY_STATE_PROPERTY_END)       ||
+            jesy_accept(ctx, JESY_TOKEN_FALSE, JESY_FALSE, JESY_STATE_PROPERTY_END)     ||
             jesy_accept(ctx, JESY_TOKEN_NULL, JESY_NULL, JESY_STATE_PROPERTY_END)       ||
             jesy_accept(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT, JESY_STATE_WANT_KEY)) {
           break;
@@ -612,10 +610,11 @@ uint32_t jesy_parse(struct jesy_context *ctx, char *json_data, uint32_t json_len
         break;
 
       case JESY_STATE_WANT_ARRAY:
-        if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_STRING, JESY_STATE_VALUE_END)   ||
-            jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_NUMBER, JESY_STATE_VALUE_END)   ||
-            jesy_accept(ctx, JESY_TOKEN_BOOLEAN, JESY_BOOLEAN, JESY_STATE_VALUE_END) ||
-            jesy_accept(ctx, JESY_TOKEN_NULL, JESY_NULL, JESY_STATE_VALUE_END)       ||
+        if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_STRING, JESY_STATE_VALUE_END)  ||
+            jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_NUMBER, JESY_STATE_VALUE_END)  ||
+            jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_TRUE, JESY_STATE_VALUE_END)      ||
+            jesy_accept(ctx, JESY_TOKEN_FALSE, JESY_FALSE, JESY_STATE_VALUE_END)    ||
+            jesy_accept(ctx, JESY_TOKEN_NULL, JESY_NULL, JESY_STATE_VALUE_END)      ||
             jesy_accept(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT, JESY_STATE_WANT_KEY) ||
             jesy_accept(ctx, JESY_TOKEN_OPENING_BRACE, JESY_ARRAY, JESY_STATE_WANT_ARRAY)) {
           break;
@@ -702,7 +701,8 @@ uint32_t jesy_get_dump_size(struct jesy_context *ctx)
       dump_size += (iter->length + sizeof(char) * 2);/* +2 for "" */
     }
     else if ((iter->type == JESY_NUMBER)  ||
-             (iter->type == JESY_BOOLEAN) ||
+             (iter->type == JESY_TRUE)    ||
+             (iter->type == JESY_FALSE)   ||
              (iter->type == JESY_NULL)) {
       dump_size += iter->length;
     }
@@ -782,7 +782,8 @@ uint32_t jesy_serialize(struct jesy_context *ctx, char *buffer, uint32_t length)
       *dst++ = '"';
     }
     else if ((iter->type == JESY_NUMBER)  ||
-             (iter->type == JESY_BOOLEAN) ||
+             (iter->type == JESY_TRUE)    ||
+             (iter->type == JESY_FALSE)   ||
              (iter->type == JESY_NULL)) {
       dst = (char*)memcpy(dst, iter->value, iter->length) + iter->length;
     }
@@ -874,20 +875,13 @@ struct jesy_element* jesy_get_array_value(struct jesy_context *ctx, struct jesy_
     if (array->type != JESY_ARRAY) {
       return NULL;
     }
+
     if (index >= 0) {
       iter = HAS_CHILD(array) ? &ctx->pool[array->first_child] : NULL;
       for (; iter && index > 0; index--) {
         iter = iter = HAS_SIBLING(iter) ? &ctx->pool[iter->sibling] : NULL;
       }
     }
-#if 0
-    else {
-      iter = HAS_CHILD(array) ? &ctx->pool[iter->last_child] : NULL;
-      for (; iter && index < 0; index++) {
-        iter = iter = HAS_SIBLING(iter) ? &ctx->pool[iter->sibling] : NULL;
-      }
-    }
-#endif
   }
   return iter;
 }

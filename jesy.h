@@ -53,7 +53,8 @@ enum jesy_token_type {
   JESY_TOKEN_CLOSING_BRACE,
   JESY_TOKEN_STRING,
   JESY_TOKEN_NUMBER,
-  JESY_TOKEN_BOOLEAN,
+  JESY_TOKEN_TRUE,
+  JESY_TOKEN_FALSE,
   JESY_TOKEN_NULL,
   JESY_TOKEN_COLON,
   JESY_TOKEN_COMMA,
@@ -68,7 +69,8 @@ enum jesy_type {
   JESY_ARRAY,
   JESY_STRING,
   JESY_NUMBER,
-  JESY_BOOLEAN,
+  JESY_TRUE,
+  JESY_FALSE,
   JESY_NULL,
 };
 
@@ -123,7 +125,7 @@ struct jesy_context {
   char     *json_data;
   /* Length of JSON data in bytes. */
   uint32_t  json_size;
-  /* Tokenizer uses this offset to track the consumed characters. */
+  /* Offset of the next symbol in the input JSON data Tokenizer is going to consume. */
   uint32_t  offset;
   /* Part of the buffer given by the user at the time of the context initialization.
    * The buffer will be used to allocate the context structure at first. Then

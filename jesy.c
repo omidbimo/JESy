@@ -27,47 +27,46 @@
 #define IS_ESCAPE(c) ((c=='\\') || (c=='\"') || (c=='\/') || (c=='\b') || \
                       (c=='\f') || (c=='\n') || (c=='\r') || (c=='\t') || (c == '\u'))
 
-#define HAS_CHILD(node_ptr) (node_ptr->child < JESY_INVALID_INDEX)
-#define HAS_LEFT(node_ptr) (node_ptr->left < JESY_INVALID_INDEX)
-#define HAS_RIGHT(node_ptr) (node_ptr->right < JESY_INVALID_INDEX)
 #define HAS_PARENT(node_ptr) (node_ptr->parent < JESY_INVALID_INDEX)
+#define HAS_SIBLING(node_ptr) (node_ptr->sibling < JESY_INVALID_INDEX)
+#define HAS_CHILD(node_ptr) (node_ptr->first_child < JESY_INVALID_INDEX)
 
-static struct jesy_node *jesy_find_duplicate_key(struct jesy_context *ctx,
-                                                 struct jesy_node *object_node,
-                                                 struct jesy_token *key_token);
+static struct jesy_element *jesy_find_duplicate_key(struct jesy_context *ctx,
+                                                    struct jesy_element *object_node,
+                                                    struct jesy_token *key_token);
 
-static struct jesy_node* jesy_allocate(struct jesy_context *ctx)
+static struct jesy_element* jesy_allocate(struct jesy_context *ctx)
 {
-  struct jesy_node *new_node = NULL;
+  struct jesy_element *new_element = NULL;
 
   if (ctx->node_count < ctx->capacity) {
     if (ctx->free) {
       /* Pop the first node from free list */
-      new_node = (struct jesy_node*)ctx->free;
+      new_element = (struct jesy_element*)ctx->free;
       ctx->free = ctx->free->next;
     }
     else {
       assert(ctx->index < ctx->capacity);
-      new_node = &ctx->pool[ctx->index];
+      new_element = &ctx->pool[ctx->index];
       ctx->index++;
     }
     /* Setting node descriptors to their default values. */
-    memset(new_node, 0xFF, sizeof(jesy_node_descriptor) * 4);
+    memset(&new_element->parent, 0xFF, sizeof(jesy_node_descriptor) * 4);
     ctx->node_count++;
   }
   else {
     ctx->status = JESY_OUT_OF_MEMORY;
   }
 
-  return new_node;
+  return new_element;
 }
 
-static void jesy_free(struct jesy_context *ctx, struct jesy_node *node)
+static void jesy_free(struct jesy_context *ctx, struct jesy_element *element)
 {
-  struct jesy_free_node *free_node = (struct jesy_free_node*)node;
+  struct jesy_free_node *free_node = (struct jesy_free_node*)element;
 
-  assert(node >= ctx->pool);
-  assert(node < (ctx->pool + ctx->capacity));
+  assert(element >= ctx->pool);
+  assert(element < (ctx->pool + ctx->capacity));
   assert(ctx->node_count > 0);
 
   if (ctx->node_count > 0) {
@@ -81,148 +80,146 @@ static void jesy_free(struct jesy_context *ctx, struct jesy_node *node)
   }
 }
 
-static struct jesy_node* jesy_get_parent_node(struct jesy_context *ctx,
-                                                 struct jesy_node *node)
+static bool jesy_validate_element(struct jesy_context *ctx, struct jesy_element *element)
 {
-  /* TODO: add checking */
-  if (node && (HAS_PARENT(node))) {
-    return &ctx->pool[node->parent];
+  assert(ctx);
+  assert(element);
+
+  if ((element >= ctx->pool) &&
+      ((((void*)element - (void*)ctx->pool) % sizeof(*element)) == 0) &&
+      ((element >= ctx->pool) < ctx->capacity)) {
+    return true;
   }
 
+  return false;
+}
+
+struct jesy_element* jesy_get_parent(struct jesy_context *ctx, struct jesy_element *element)
+{
+  if (ctx && element && jesy_validate_element(ctx, element)) {
+    if (HAS_PARENT(element)) {
+      return &ctx->pool[element->parent];
+    }
+  }
   return NULL;
 }
 
-static struct jesy_node* jesy_get_parent_node_bytype(struct jesy_context *ctx,
-                                                     struct jesy_node *node,
-                                                     enum jesy_node_type type)
+struct jesy_element* jesy_get_sibling(struct jesy_context *ctx, struct jesy_element *element)
 {
-  struct jesy_node *parent = NULL;
-  /* TODO: add checkings */
-  while (node && HAS_PARENT(node)) {
-    node = &ctx->pool[node->parent];
-    if (node->data.type == type) {
-      parent = node;
-      break;
+  if (ctx && element && jesy_validate_element(ctx, element)) {
+    if (HAS_SIBLING(element)) {
+      return &ctx->pool[element->sibling];
     }
   }
+  return NULL;
+}
 
+struct jesy_element* jesy_get_child(struct jesy_context *ctx, struct jesy_element *element)
+{
+  if (ctx && element && jesy_validate_element(ctx, element)) {
+    if (HAS_CHILD(element)) {
+      return &ctx->pool[element->first_child];
+    }
+  }
+  return NULL;
+}
+
+static struct jesy_element* jesy_get_parent_bytype(struct jesy_context *ctx,
+                                                   struct jesy_element *element,
+                                                   enum jesy_type type)
+{
+  struct jesy_element *parent = NULL;
+  if (ctx && element && jesy_validate_element(ctx, element)) {
+    while (element && HAS_PARENT(element)) {
+      element = &ctx->pool[element->parent];
+      if (element->type == type) {
+        parent = element;
+        break;
+      }
+    }
+  }
   return parent;
 }
 
-static struct jesy_node* jesy_get_structure_parent_node(struct jesy_context *ctx,
-                                                        struct jesy_node *node)
+static struct jesy_element* jesy_get_structure_parent_node(struct jesy_context *ctx,
+                                                           struct jesy_element *element)
 {
-  struct jesy_node *parent = NULL;
-  /* TODO: add checkings */
-  while (node && HAS_PARENT(node)) {
-    node = &ctx->pool[node->parent];
-    if ((node->data.type == JESY_OBJECT) || (node->data.type == JESY_ARRAY)) {
-      parent = node;
-      break;
+  struct jesy_element *parent = NULL;
+  if (ctx && element && jesy_validate_element(ctx, element)) {
+    while (element && HAS_PARENT(element)) {
+      element = &ctx->pool[element->parent];
+      if ((element->type == JESY_OBJECT) || (element->type == JESY_ARRAY)) {
+        parent = element;
+        break;
+      }
     }
   }
-
   return parent;
 }
 
-static struct jesy_node* jesy_get_child_node(struct jesy_context *ctx,
-                                             struct jesy_node *node)
+static struct jesy_element* jesy_add_element(struct jesy_context *ctx,
+                                             struct jesy_element *parent,
+                                             uint16_t type,
+                                             uint32_t offset,
+                                             uint16_t length)
 {
-  /* TODO: add checkings */
-  if (node && HAS_CHILD(node)) {
-    return &ctx->pool[node->child];
-  }
+  struct jesy_element *new_element = jesy_allocate(ctx);
 
-  return NULL;
-}
+  if (new_element) {
+    new_element->type = type;
+    new_element->length = length;
+    new_element->value = &ctx->json_data[offset];
 
-static struct jesy_node* jesy_get_right_node(struct jesy_context *ctx,
-                                             struct jesy_node *node)
-{
-  /* TODO: add checkings */
-  if (node && HAS_RIGHT(node)) {
-    return &ctx->pool[node->right];
-  }
+    if (parent) {
+      new_element->parent = (jesy_node_descriptor)(parent - ctx->pool); /* parent's index */
 
-  return NULL;
-}
-
-static struct jesy_node* jesy_add_node(struct jesy_context *ctx,
-                                       struct jesy_node *node,
-                                       uint16_t type,
-                                       uint32_t offset,
-                                       uint16_t length)
-{
-  struct jesy_node *new_node = jesy_allocate(ctx);
-
-  if (new_node) {
-    new_node->data.type = type;
-    new_node->data.length = length;
-    new_node->data.value = &ctx->json_data[offset];
-
-    if (node) {
-      new_node->parent = (jesy_node_descriptor)(node - ctx->pool); /* node's index */
-
-      if (HAS_CHILD(node)) {
-        struct jesy_node *child = &ctx->pool[node->child];
-
-        if (HAS_LEFT(child)) {
-          struct jesy_node *last = &ctx->pool[child->left];
-          last->right = (jesy_node_descriptor)(new_node - ctx->pool); /* new_node's index */
-        }
-        else {
-          child->right = (jesy_node_descriptor)(new_node - ctx->pool); /* new_node's index */
-          //new_node->left = (jesy_node_descriptor)(child - ctx->pool); /* new_node's index */
-        }
-        child->left = (jesy_node_descriptor)(new_node - ctx->pool); /* new_node's index */
+      if (HAS_CHILD(parent)) {
+        struct jesy_element *last = &ctx->pool[parent->last_child];
+        last->sibling = (jesy_node_descriptor)(new_element - ctx->pool); /* new_element's index */
       }
       else {
-        node->child = (jesy_node_descriptor)(new_node - ctx->pool); /* new_node's index */
+        parent->first_child = (jesy_node_descriptor)(new_element - ctx->pool); /* new_element's index */
       }
+      parent->last_child = (jesy_node_descriptor)(new_element - ctx->pool); /* new_element's index */
     }
     else {
       assert(!ctx->root);
-      ctx->root = new_node;
+      ctx->root = new_element;
     }
   }
 
-  return new_node;
+  return new_element;
 }
 
-static void jesy_delete_node(struct jesy_context *ctx, struct jesy_node *node)
+static void jesy_delete_element(struct jesy_context *ctx, struct jesy_element *element)
 {
-  struct jesy_node *iter = jesy_get_child_node(ctx, node);
-  struct jesy_node *parent = NULL;
-  struct jesy_node *prev = NULL;
+  struct jesy_element *iter = NULL;
+  struct jesy_element *parent = NULL;
+  struct jesy_element *prev = NULL;
 
-  do {
-    iter = node;
-    prev = iter;
-    parent = jesy_get_parent_node(ctx, iter);
+  if (!jesy_validate_element(ctx, element)) {
+    return;
+  }
 
-    while (true) {
-      while (HAS_RIGHT(iter)) {
-        prev = iter;
-        iter = jesy_get_right_node(ctx, iter);
-      }
-
-      if (HAS_CHILD(iter)) {
-        iter = jesy_get_child_node(ctx, iter);
-        parent = jesy_get_parent_node(ctx, iter);
-        continue;
-      }
-
-      break;
+  iter = element;
+  while (true) {
+    prev = NULL;
+    while (HAS_CHILD(iter)) {
+      iter = &ctx->pool[iter->first_child];
     }
-    if (prev) { prev->right = JESY_INVALID_INDEX; }
-    if (parent) { parent->child = JESY_INVALID_INDEX; }
-    if (ctx->root == iter) {
-      ctx->root = NULL;
+
+    if (HAS_PARENT(iter)) {
+      ctx->pool[iter->parent].first_child = iter->sibling;
+    }
+
+    if (!HAS_SIBLING(iter) && HAS_PARENT(iter)) {
+        ctx->pool[iter->parent].last_child = JESY_INVALID_INDEX;
     }
 
     jesy_free(ctx, iter);
-
-  } while (iter != node);
+    iter = jesy_get_parent(ctx, iter);
+    continue;
+  }
 }
 
 static struct jesy_token jesy_get_token(struct jesy_context *ctx)
@@ -405,43 +402,31 @@ static struct jesy_token jesy_get_token(struct jesy_context *ctx)
   return token;
 }
 
-static enum jesy_node_type jesy_get_parent_type(struct jesy_context *ctx,
-                                              struct jesy_node *node)
+static struct jesy_element *jesy_find_duplicate_key(struct jesy_context *ctx,
+                                                    struct jesy_element *object,
+                                                    struct jesy_token *key_token)
 {
-  if (node) {
-    return ctx->pool[node->parent].data.type;
+  struct jesy_element *duplicate = NULL;
+  struct jesy_element *iter = NULL;
+
+  assert(object->type == JESY_OBJECT);
+  if (object->type != JESY_OBJECT) {
+    return NULL;
   }
-  return JESY_NONE;
-}
 
-static struct jesy_node *jesy_find_duplicate_key(struct jesy_context *ctx,
-              struct jesy_node *object_node, struct jesy_token *key_token)
-{
-  struct jesy_node *duplicate = NULL;
-
-  if (object_node->data.type == JESY_OBJECT)
-  {
-    struct jesy_node *iter = object_node;
-    if (HAS_CHILD(iter)) {
-      iter = jesy_get_child_node(ctx, iter);
-      assert(iter->data.type == JESY_KEY);
-      if ((iter->data.length == key_token->length) &&
-          (memcmp(iter->data.value, &ctx->json_data[key_token->offset], key_token->length) == 0)) {
-        duplicate = iter;
-      }
-      else {
-        while (HAS_RIGHT(iter)) {
-          iter = jesy_get_right_node(ctx, iter);
-          if ((iter->data.length == key_token->length) &&
-              (memcmp(iter->data.value, &ctx->json_data[key_token->offset], key_token->length) == 0)) {
-            duplicate = iter;
-          }
-        }
-      }
+  iter = HAS_CHILD(object) ? &ctx->pool[object->first_child] : NULL;
+  while(iter) {
+    assert(iter->type == JESY_KEY);
+    if ((iter->length == key_token->length) &&
+        (strncmp(iter->value, &ctx->json_data[key_token->offset], key_token->length) == 0)) {
+      duplicate = iter;
+      break;
     }
+    iter = HAS_SIBLING(object) ? &ctx->pool[object->sibling] : NULL;
   }
   return duplicate;
 }
+
 /*
  *  Parser state machine steps
  *    1. Accept
@@ -450,39 +435,39 @@ static struct jesy_node *jesy_find_duplicate_key(struct jesy_context *ctx,
  *    4. State transition
 */
 static bool jesy_accept(struct jesy_context *ctx,
-                       enum jesy_token_type token_type,
-                       enum jesy_node_type node_type,
-                       enum jesy_parser_state state)
+                        enum jesy_token_type token_type,
+                        enum jesy_type element_type,
+                        enum jesy_parser_state state)
 {
   if (ctx->token.type == token_type) {
-    struct jesy_node *new_node = NULL;
+    struct jesy_element *new_node = NULL;
     //printf("\n     Parser State: %s", jesy_state_str[ctx->state]);
-    if (node_type == JESY_KEY) {
+    if (element_type == JESY_KEY) {
 #ifdef JESY_OVERWRITE_DUPLICATE_KEYS
       /* No duplicate keys in the same object are allowed.
          Only the last key:value will be reported if the keys are duplicated. */
-      struct jesy_node *node = jesy_find_duplicate_key(ctx, ctx->iter, &ctx->token);
+      struct jesy_element *node = jesy_find_duplicate_key(ctx, ctx->iter, &ctx->token);
       if (node) {
-        jesy_delete_node(ctx, jesy_get_child_node(ctx, node));
+        jesy_delete_element(ctx, jesy_get_child(ctx, node));
         ctx->iter = node;
       }
       else
 #endif
       {
-        new_node = jesy_add_node(ctx, ctx->iter, node_type, ctx->token.offset, ctx->token.length);
+        new_node = jesy_add_element(ctx, ctx->iter, element_type, ctx->token.offset, ctx->token.length);
       }
     }
-    else if ((node_type == JESY_OBJECT) ||
-             (node_type == JESY_ARRAY)) {
-      new_node = jesy_add_node(ctx, ctx->iter, node_type, ctx->token.offset, ctx->token.length);
+    else if ((element_type == JESY_OBJECT) ||
+             (element_type == JESY_ARRAY)) {
+      new_node = jesy_add_element(ctx, ctx->iter, element_type, ctx->token.offset, ctx->token.length);
     }
-    else if (node_type == JESY_VALUE_STRING) {
-      new_node = jesy_add_node(ctx, ctx->iter, node_type, ctx->token.offset, ctx->token.length);
+    else if (element_type == JESY_STRING) {
+      new_node = jesy_add_element(ctx, ctx->iter, element_type, ctx->token.offset, ctx->token.length);
     }
-    else if ((node_type == JESY_VALUE_NUMBER)  ||
-             (node_type == JESY_VALUE_BOOLEAN) ||
-             (node_type == JESY_VALUE_NULL)) {
-      new_node = jesy_add_node(ctx, ctx->iter, node_type, ctx->token.offset, ctx->token.length);
+    else if ((element_type == JESY_NUMBER)  ||
+             (element_type == JESY_BOOLEAN) ||
+             (element_type == JESY_NULL)) {
+      new_node = jesy_add_element(ctx, ctx->iter, element_type, ctx->token.offset, ctx->token.length);
     }
     else { /* JESY_NONE */
        /* None-Key/Value tokens trigger upward iteration to the parent node.
@@ -496,22 +481,22 @@ static bool jesy_accept(struct jesy_context *ctx,
       if (token_type == JESY_TOKEN_CLOSING_BRACE) {
         /* [] (empty array) is a special case that needs no iteration in the
            direction the parent node. */
-        if (ctx->iter->data.type != JESY_ARRAY) {
-          ctx->iter = jesy_get_parent_node_bytype(ctx, ctx->iter, JESY_ARRAY);
+        if (ctx->iter->type != JESY_ARRAY) {
+          ctx->iter = jesy_get_parent_bytype(ctx, ctx->iter, JESY_ARRAY);
         }
         ctx->iter = jesy_get_structure_parent_node(ctx, ctx->iter);
       }
       else if (token_type == JESY_TOKEN_CLOSING_BRACKET) {
         /* {} (empty object)is a special case that needs no iteration in the
            direction the parent node. */
-        if (ctx->iter->data.type != JESY_OBJECT) {
-          ctx->iter = jesy_get_parent_node_bytype(ctx, ctx->iter, JESY_OBJECT);
+        if (ctx->iter->type != JESY_OBJECT) {
+          ctx->iter = jesy_get_parent_bytype(ctx, ctx->iter, JESY_OBJECT);
         }
         ctx->iter = jesy_get_structure_parent_node(ctx, ctx->iter);
       }
       else if (token_type == JESY_TOKEN_COMMA) {
-        if ((ctx->iter->data.type != JESY_OBJECT) &&
-            (ctx->iter->data.type != JESY_ARRAY)) {
+        if ((ctx->iter->type != JESY_OBJECT) &&
+            (ctx->iter->type != JESY_ARRAY)) {
           ctx->iter = jesy_get_structure_parent_node(ctx, ctx->iter);
         }
       }
@@ -520,8 +505,8 @@ static bool jesy_accept(struct jesy_context *ctx,
     if (ctx->status) return true;
     if (new_node) {
       ctx->iter = new_node;
-      JESY_LOG_NODE(ctx->iter - ctx->pool, ctx->iter->data.type,
-                    ctx->iter->parent, ctx->iter->right, ctx->iter->child);
+      JESY_LOG_NODE(ctx->iter - ctx->pool, ctx->iter->type,
+                    ctx->iter->parent, ctx->iter->sibling, ctx->iter->first_child);
     }
 
     ctx->state = state;
@@ -535,10 +520,10 @@ static bool jesy_accept(struct jesy_context *ctx,
 
 static bool jesy_expect(struct jesy_context *ctx,
                         enum jesy_token_type token_type,
-                        enum jesy_node_type node_type,
+                        enum jesy_type element_type,
                         enum jesy_parser_state state)
 {
-  if (jesy_accept(ctx, token_type, node_type, state)) {
+  if (jesy_accept(ctx, token_type, element_type, state)) {
     return true;
   }
   if (!ctx->status) {
@@ -568,10 +553,10 @@ struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size)
   ctx->json_size = 0;
   ctx->offset = (uint32_t)-1;
   ctx->index = 0;
-  ctx->pool = (struct jesy_node*)(ctx + 1);
+  ctx->pool = (struct jesy_element*)(ctx + 1);
   ctx->pool_size = pool_size - (uint32_t)(sizeof(struct jesy_context));
-  ctx->capacity = (ctx->pool_size / sizeof(struct jesy_node)) < JESY_INVALID_INDEX
-                 ? (jesy_node_descriptor)(ctx->pool_size / sizeof(struct jesy_node))
+  ctx->capacity = (ctx->pool_size / sizeof(struct jesy_element)) < JESY_INVALID_INDEX
+                 ? (jesy_node_descriptor)(ctx->pool_size / sizeof(struct jesy_element))
                  : JESY_INVALID_INDEX -1;
 
   ctx->iter = NULL;
@@ -594,7 +579,7 @@ uint32_t jesy_parse(struct jesy_context *ctx, char *json_data, uint32_t json_len
 
   do {
     if (ctx->token.type == JESY_TOKEN_EOF) { break; }
-    //if (ctx->iter)printf("\n    State: %s, node: %s", jesy_state_str[ctx->state], jesy_node_type_str[ctx->iter->data.type]);
+    //if (ctx->iter)printf("\n    State: %s, node: %s", jesy_state_str[ctx->state], jesy_node_type_str[ctx->iter->type]);
     switch (ctx->state) {
       /* Only an opening bracket is acceptable in this state. */
       case JESY_STATE_START:
@@ -615,10 +600,10 @@ uint32_t jesy_parse(struct jesy_context *ctx, char *json_data, uint32_t json_len
         break;
 
       case JESY_STATE_WANT_VALUE:
-        if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_VALUE_STRING, JESY_STATE_PROPERTY_END)   ||
-            jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_VALUE_NUMBER, JESY_STATE_PROPERTY_END)   ||
-            jesy_accept(ctx, JESY_TOKEN_BOOLEAN, JESY_VALUE_BOOLEAN, JESY_STATE_PROPERTY_END) ||
-            jesy_accept(ctx, JESY_TOKEN_NULL, JESY_VALUE_NULL, JESY_STATE_PROPERTY_END)       ||
+        if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_STRING, JESY_STATE_PROPERTY_END)   ||
+            jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_NUMBER, JESY_STATE_PROPERTY_END)   ||
+            jesy_accept(ctx, JESY_TOKEN_BOOLEAN, JESY_BOOLEAN, JESY_STATE_PROPERTY_END) ||
+            jesy_accept(ctx, JESY_TOKEN_NULL, JESY_NULL, JESY_STATE_PROPERTY_END)       ||
             jesy_accept(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT, JESY_STATE_WANT_KEY)) {
           break;
         }
@@ -627,10 +612,10 @@ uint32_t jesy_parse(struct jesy_context *ctx, char *json_data, uint32_t json_len
         break;
 
       case JESY_STATE_WANT_ARRAY:
-        if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_VALUE_STRING, JESY_STATE_VALUE_END)   ||
-            jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_VALUE_NUMBER, JESY_STATE_VALUE_END)   ||
-            jesy_accept(ctx, JESY_TOKEN_BOOLEAN, JESY_VALUE_BOOLEAN, JESY_STATE_VALUE_END) ||
-            jesy_accept(ctx, JESY_TOKEN_NULL, JESY_VALUE_NULL, JESY_STATE_VALUE_END)       ||
+        if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_STRING, JESY_STATE_VALUE_END)   ||
+            jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_NUMBER, JESY_STATE_VALUE_END)   ||
+            jesy_accept(ctx, JESY_TOKEN_BOOLEAN, JESY_BOOLEAN, JESY_STATE_VALUE_END) ||
+            jesy_accept(ctx, JESY_TOKEN_NULL, JESY_NULL, JESY_STATE_VALUE_END)       ||
             jesy_accept(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT, JESY_STATE_WANT_KEY) ||
             jesy_accept(ctx, JESY_TOKEN_OPENING_BRACE, JESY_ARRAY, JESY_STATE_WANT_ARRAY)) {
           break;
@@ -663,13 +648,13 @@ uint32_t jesy_parse(struct jesy_context *ctx, char *json_data, uint32_t json_len
          When a structure is closed, another closing symbol is allowed.
          Otherwise, only a separator is acceptable. */
       case JESY_STATE_STRUCTURE_END:
-        if (ctx->iter->data.type == JESY_OBJECT) {
+        if (ctx->iter->type == JESY_OBJECT) {
           if (jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACKET, JESY_NONE, JESY_STATE_STRUCTURE_END)) {
             break;
           }
           jesy_expect(ctx, JESY_TOKEN_COMMA, JESY_NONE, JESY_STATE_WANT_KEY);
         }
-        else if(ctx->iter->data.type == JESY_ARRAY) {
+        else if(ctx->iter->type == JESY_ARRAY) {
           if (jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE, JESY_STATE_STRUCTURE_END)) {
             break;
           }
@@ -702,26 +687,26 @@ uint32_t jesy_parse(struct jesy_context *ctx, char *json_data, uint32_t json_len
 
 uint32_t jesy_get_dump_size(struct jesy_context *ctx)
 {
-  struct jesy_node *iter = ctx->root;
+  struct jesy_element *iter = ctx->root;
   uint32_t dump_size = 0;
 
   while (iter) {
 
-    if (iter->data.type == JESY_OBJECT) {
+    if (iter->type == JESY_OBJECT) {
       dump_size++; /* '{' */
     }
-    else if (iter->data.type == JESY_KEY) {
-      dump_size += (iter->data.length + sizeof(char) * 3);/* +1 for ':' +2 for "" */
+    else if (iter->type == JESY_KEY) {
+      dump_size += (iter->length + sizeof(char) * 3);/* +1 for ':' +2 for "" */
     }
-    else if (iter->data.type == JESY_VALUE_STRING) {
-      dump_size += (iter->data.length + sizeof(char) * 2);/* +2 for "" */
+    else if (iter->type == JESY_STRING) {
+      dump_size += (iter->length + sizeof(char) * 2);/* +2 for "" */
     }
-    else if ((iter->data.type == JESY_VALUE_NUMBER)  ||
-             (iter->data.type == JESY_VALUE_BOOLEAN) ||
-             (iter->data.type == JESY_VALUE_NULL)) {
-      dump_size += iter->data.length;
+    else if ((iter->type == JESY_NUMBER)  ||
+             (iter->type == JESY_BOOLEAN) ||
+             (iter->type == JESY_NULL)) {
+      dump_size += iter->length;
     }
-    else if (iter->data.type == JESY_ARRAY) {
+    else if (iter->type == JESY_ARRAY) {
       dump_size++; /* '[' */
     }
     else {
@@ -730,33 +715,33 @@ uint32_t jesy_get_dump_size(struct jesy_context *ctx)
     }
 
     if (HAS_CHILD(iter)) {
-      iter = jesy_get_child_node(ctx, iter);
+      iter = jesy_get_child(ctx, iter);
       continue;
     }
 
-    if (iter->data.type == JESY_OBJECT) {
+    if (iter->type == JESY_OBJECT) {
       dump_size++; /* '}' */
     }
 
-    else if (iter->data.type == JESY_ARRAY) {
+    else if (iter->type == JESY_ARRAY) {
       dump_size++; /* ']' */
     }
 
-    if (HAS_RIGHT(iter)) {
-      iter = jesy_get_right_node(ctx, iter);
+    if (HAS_SIBLING(iter)) {
+      iter = jesy_get_sibling(ctx, iter);
       dump_size++; /* ',' */
       continue;
     }
 
-    while ((iter = jesy_get_parent_node(ctx, iter))) {
-      if (iter->data.type == JESY_OBJECT) {
+    while ((iter = jesy_get_parent(ctx, iter))) {
+      if (iter->type == JESY_OBJECT) {
         dump_size++; /* '}' */
       }
-      else if (iter->data.type == JESY_ARRAY) {
+      else if (iter->type == JESY_ARRAY) {
         dump_size++; /* ']' */
       }
-      if (HAS_RIGHT(iter)) {
-        iter = jesy_get_right_node(ctx, iter);
+      if (HAS_SIBLING(iter)) {
+        iter = jesy_get_sibling(ctx, iter);
         dump_size++; /* ',' */
         break;
       }
@@ -765,10 +750,10 @@ uint32_t jesy_get_dump_size(struct jesy_context *ctx)
   return dump_size;
 }
 
-uint32_t jesy_render(struct jesy_context *ctx, char *buffer, uint32_t length)
+uint32_t jesy_serialize(struct jesy_context *ctx, char *buffer, uint32_t length)
 {
   char *dst = buffer;
-  struct jesy_node *iter = ctx->root;
+  struct jesy_element *iter = ctx->root;
   uint32_t required_buffer = 0;
 
   required_buffer = jesy_get_dump_size(ctx);
@@ -782,26 +767,26 @@ uint32_t jesy_render(struct jesy_context *ctx, char *buffer, uint32_t length)
 
   while (iter) {
 
-    if (iter->data.type == JESY_OBJECT) {
+    if (iter->type == JESY_OBJECT) {
       *dst++ = '{';
     }
-    else if (iter->data.type == JESY_KEY) {
+    else if (iter->type == JESY_KEY) {
       *dst++ = '"';
-      dst = (char*)memcpy(dst, iter->data.value, iter->data.length) + iter->data.length;
+      dst = (char*)memcpy(dst, iter->value, iter->length) + iter->length;
       *dst++ = '"';
       *dst++ = ':';
     }
-    else if (iter->data.type == JESY_VALUE_STRING) {
+    else if (iter->type == JESY_STRING) {
       *dst++ = '"';
-      dst = (char*)memcpy(dst, iter->data.value, iter->data.length) + iter->data.length;
+      dst = (char*)memcpy(dst, iter->value, iter->length) + iter->length;
       *dst++ = '"';
     }
-    else if ((iter->data.type == JESY_VALUE_NUMBER)  ||
-             (iter->data.type == JESY_VALUE_BOOLEAN) ||
-             (iter->data.type == JESY_VALUE_NULL)) {
-      dst = (char*)memcpy(dst, iter->data.value, iter->data.length) + iter->data.length;
+    else if ((iter->type == JESY_NUMBER)  ||
+             (iter->type == JESY_BOOLEAN) ||
+             (iter->type == JESY_NULL)) {
+      dst = (char*)memcpy(dst, iter->value, iter->length) + iter->length;
     }
-    else if (iter->data.type == JESY_ARRAY) {
+    else if (iter->type == JESY_ARRAY) {
       *dst++ = '[';
     }
     else {
@@ -811,33 +796,33 @@ uint32_t jesy_render(struct jesy_context *ctx, char *buffer, uint32_t length)
     }
 
     if (HAS_CHILD(iter)) {
-      iter = jesy_get_child_node(ctx, iter);
+      iter = jesy_get_child(ctx, iter);
       continue;
     }
 
-    if (iter->data.type == JESY_OBJECT) {
+    if (iter->type == JESY_OBJECT) {
       *dst++ = '}';
     }
 
-    else if (iter->data.type == JESY_ARRAY) {
+    else if (iter->type == JESY_ARRAY) {
       *dst++ = ']';
     }
 
-    if (HAS_RIGHT(iter)) {
-      iter = jesy_get_right_node(ctx, iter);
+    if (HAS_SIBLING(iter)) {
+      iter = jesy_get_sibling(ctx, iter);
       *dst++ = ',';
       continue;
     }
 
-     while ((iter = jesy_get_parent_node(ctx, iter))) {
-      if (iter->data.type == JESY_OBJECT) {
+     while ((iter = jesy_get_parent(ctx, iter))) {
+      if (iter->type == JESY_OBJECT) {
         *dst++ = '}';
       }
-      else if (iter->data.type == JESY_ARRAY) {
+      else if (iter->type == JESY_ARRAY) {
         *dst++ = ']';
       }
-      if (HAS_RIGHT(iter)) {
-        iter = jesy_get_right_node(ctx, iter);
+      if (HAS_SIBLING(iter)) {
+        iter = jesy_get_sibling(ctx, iter);
         *dst++ = ',';
         break;
       }
@@ -848,68 +833,10 @@ uint32_t jesy_render(struct jesy_context *ctx, char *buffer, uint32_t length)
   return dst - buffer;
 }
 
-
-static uint32_t jesy_get_user_key_len(char *key)
-{
-  return (uint16_t)strnlen(key, 0xFFFF);
-}
-
 struct jesy_element* jesy_get_root(struct jesy_context *ctx)
 {
   if (ctx) {
-    ctx->iter = ctx->root;
-    return &ctx->iter->data;
-  }
-  return NULL;
-}
-
-static struct jesy_node* get_node_from_element(struct jesy_context *ctx, struct jesy_element *element)
-{
-  assert(ctx);
-  assert(element);
-
-  struct jesy_node *node = ((struct jesy_node*)((char*)(element) -  offsetof(struct jesy_node, data)));
-  if ((node >= ctx->pool) &&
-      ((((void*)node - (void*)ctx->pool) % sizeof(*node)) == 0) &&
-      ((node >= ctx->pool) < ctx->capacity)) {
-    return node;
-  }
-
-  return NULL;
-}
-
-struct jesy_element* jesy_get_parent(struct jesy_context *ctx, struct jesy_element *element)
-{
-  struct jesy_node* node;
-  if (ctx && element) {
-    node = get_node_from_element(ctx, element);
-    if (node && HAS_PARENT(node)) {
-      return &ctx->pool[node->parent].data;
-    }
-  }
-  return NULL;
-}
-
-struct jesy_element* jesy_get_child(struct jesy_context *ctx, struct jesy_element *element)
-{
-  struct jesy_node* node;
-  if (ctx && element) {
-    node = get_node_from_element(ctx, element);
-    if (node && HAS_CHILD(node)) {
-      return &ctx->pool[node->child].data;
-    }
-  }
-  return NULL;
-}
-
-struct jesy_element* jesy_get_right(struct jesy_context *ctx, struct jesy_element *element)
-{
-  struct jesy_node* node;
-  if (ctx && element) {
-    node = get_node_from_element(ctx, element);
-    if (node && HAS_RIGHT(node)) {
-      return &ctx->pool[node->right].data;
-    }
+    return ctx->root;
   }
   return NULL;
 }
@@ -919,106 +846,50 @@ void jesy_reset_iterator(struct jesy_context *ctx)
   ctx->iter = ctx->root;
 }
 
-bool jesy_find(struct jesy_context *ctx, struct jesy_element *element, char *key)
+struct jesy_element* jesy_get_key_value(struct jesy_context *ctx, struct jesy_element *object, char *key)
 {
-  bool result = false;
-  struct jesy_node *iter = ctx->iter;
-  uint16_t key_length = (uint16_t)strnlen(key, 0xFFFF);
-  if ((key_length == 0) || (key_length == 0xFFFF)) {
-    return false;
-  }
+  struct jesy_element *iter = NULL;
+  if (ctx && object && key && jesy_validate_element(ctx, object)) {
+    if (object->type != JESY_OBJECT) {
+      return NULL;
+    }
+    uint32_t key_len = (uint16_t)strnlen(key, 0xFFFF);
 
-  if (iter->data.type != JESY_OBJECT) {
-    if (!(iter = jesy_get_parent_node_bytype(ctx, iter, JESY_OBJECT))) {
-      return false;
+    iter = HAS_CHILD(object) ? &ctx->pool[object->first_child] : NULL;
+    while (iter) {
+      if ((iter->length == key_len) && (0 == strncmp(iter->value, key, key_len))) {
+        iter = HAS_CHILD(iter) ? &ctx->pool[iter->first_child] : NULL;
+        break;
+      }
+      iter = HAS_SIBLING(iter) ? &ctx->pool[iter->sibling] : NULL;
     }
   }
-
-  iter = jesy_get_child_node(ctx, iter);
-  assert(iter);
-  assert(iter->data.type == JESY_KEY);
-
-  while (iter) {
-    if ((iter->data.length == key_length) &&
-        (memcmp(iter->data.value, key, key_length) == 0)) {
-      ctx->iter = iter;
-      result = true;
-      break;
-    }
-    iter = jesy_get_right_node(ctx, iter);
-  }
-  return result;
+  return iter;
 }
 
-bool jesy_has(struct jesy_context *ctx, struct jesy_element *element, char *key)
+struct jesy_element* jesy_get_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index)
 {
-  bool result = false;
-  struct jesy_node *iter = ctx->iter;
-  uint16_t key_length = (uint16_t)strnlen(key, 0xFFFF);
-  if ((key_length == 0) || (key_length == 0xFFFF)) {
-    return false;
-  }
-
-  if (iter->data.type != JESY_OBJECT) {
-    if (!(iter = jesy_get_parent_node_bytype(ctx, iter, JESY_OBJECT))) {
-      return false;
+  struct jesy_element *iter = NULL;
+  if (ctx && array && jesy_validate_element(ctx, array)) {
+    if (array->type != JESY_ARRAY) {
+      return NULL;
     }
-  }
-
-  iter = jesy_get_child_node(ctx, iter);
-  assert(iter);
-  assert(iter->data.type == JESY_KEY);
-
-  while (iter) {
-    if ((iter->data.length == key_length) &&
-        (memcmp(iter->data.value, key, key_length) == 0)) {
-      result = true;
-      break;
-    }
-    iter = jesy_get_right_node(ctx, iter);
-  }
-  return result;
-}
-
-
-enum jesy_node_type jesy_get_type(struct jesy_context *ctx, char *key)
-{
-  enum jesy_node_type result = JESY_NONE;
-  struct jesy_node *iter = ctx->iter;
-  uint16_t key_length = (uint16_t)strnlen(key, 0xFFFF);
-  if ((key_length == 0) || (key_length == 0xFFFF)) {
-    return false;
-  }
-
-  if (iter->data.type != JESY_OBJECT) {
-    if (!(iter = jesy_get_parent_node_bytype(ctx, iter, JESY_OBJECT))) {
-      return false;
-    }
-  }
-
-  iter = jesy_get_child_node(ctx, iter);
-  assert(iter);
-  assert(iter->data.type == JESY_KEY);
-
-  while (iter) {
-    if ((iter->data.length == key_length) &&
-        (memcmp(iter->data.value, key, key_length) == 0)) {
-      if (HAS_CHILD(iter)) {
-          result = jesy_get_child_node(ctx, iter)->data.type;
-          break;
+    if (index >= 0) {
+      iter = HAS_CHILD(array) ? &ctx->pool[array->first_child] : NULL;
+      for (; iter && index > 0; index--) {
+        iter = iter = HAS_SIBLING(iter) ? &ctx->pool[iter->sibling] : NULL;
       }
     }
-    iter = jesy_get_right_node(ctx, iter);
+#if 0
+    else {
+      iter = HAS_CHILD(array) ? &ctx->pool[iter->last_child] : NULL;
+      for (; iter && index < 0; index++) {
+        iter = iter = HAS_SIBLING(iter) ? &ctx->pool[iter->sibling] : NULL;
+      }
+    }
+#endif
   }
-  return result;
-}
-
-struct jesy_element* jesy_get(struct jesy_context *ctx, struct jesy_element *element, char *key)
-{
-  if (jesy_find(ctx, element, key)) {
-    return &jesy_get_child_node(ctx, ctx->iter)->data;
-  }
-  return NULL;
+  return iter;
 }
 
 bool jesy_set(struct jesy_context *ctx, char *key, char *value, uint16_t length)

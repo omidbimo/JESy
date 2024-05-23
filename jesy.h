@@ -61,21 +61,15 @@ enum jesy_token_type {
   JESY_TOKEN_INVALID,
 };
 
-enum jesy_node_type {
+enum jesy_type {
   JESY_NONE = 0,
   JESY_OBJECT,
   JESY_KEY,
   JESY_ARRAY,
-  JESY_VALUE_STRING,
-  JESY_VALUE_NUMBER,
-  JESY_VALUE_BOOLEAN,
-  JESY_VALUE_NULL,
-};
-
-struct jesy_element {
-  uint16_t type; /* of type enum jesy_node_type */
-  uint16_t length;
-  char    *value;
+  JESY_STRING,
+  JESY_NUMBER,
+  JESY_BOOLEAN,
+  JESY_NULL,
 };
 
 #ifdef JESY_USE_32BIT_NODE_DESCRIPTOR
@@ -92,19 +86,27 @@ struct jesy_free_node {
   struct jesy_free_node *next;
 };
 
-struct jesy_node {
+/* An element is a TLV with additional members to track the its position in the
+   JSON tree. */
+struct jesy_element {
+  /* Type of element. See jesy_type */
+  uint16_t type;
+  /* Length of value */
+  uint16_t length;
+  /* Value of element */
+  char    *value;
   /* Index of the parent node. Each node holds the index of its parent. */
   jesy_node_descriptor parent;
   /* Index */
-  jesy_node_descriptor left;
-  /* Index */
-  jesy_node_descriptor right;
+  jesy_node_descriptor sibling;
   /* Each parent keeps only the index of its first child. The remaining child nodes
      will be tracked using the right member of the first child. */
-  jesy_node_descriptor child;
+  jesy_node_descriptor first_child;
   /* The data member is a TLV (Type, Length, Value) which value is pointer to the
      actual value of the node. See jesy.h */
-  struct jesy_element data;
+  /* Index */
+  jesy_node_descriptor last_child;
+
 };
 
 struct jesy_token {
@@ -127,7 +129,7 @@ struct jesy_context {
    * The buffer will be used to allocate the context structure at first. Then
    * the remaining will be used as a pool of nodes (max. 65535 nodes).
    * Actually the pool member points to the memory after context. */
-   struct jesy_node *pool;
+   struct jesy_element *pool;
   /* Pool size in bytes. It is limited to 32-bit value which is more than what
    * most of embedded systems can provide. */
   uint32_t  pool_size;
@@ -141,9 +143,9 @@ struct jesy_context {
   /* Holds the last token delivered by tokenizer. */
   struct jesy_token token;
   /* Internal node iterator */
-  struct jesy_node *iter;
+  struct jesy_element *iter;
   /* Holds the main object node */
-  struct jesy_node *root;
+  struct jesy_element *root;
   /* Singly Linked list of freed nodes. This way the deleted nodes can be recycled
      by the allocator. */
   struct jesy_free_node *free;
@@ -151,26 +153,26 @@ struct jesy_context {
 
 struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size);
 uint32_t jesy_parse(struct jesy_context* ctx, char *json_data, uint32_t json_length);
-uint32_t jesy_render(struct jesy_context *ctx, char *dst, uint32_t length);
+uint32_t jesy_serialize(struct jesy_context *ctx, char *dst, uint32_t length);
 
 void jesy_reset_iterator(struct jesy_context *ctx);
 
 struct jesy_element* jesy_get_root(struct jesy_context *ctx);
 struct jesy_element* jesy_get_parent(struct jesy_context *ctx, struct jesy_element *element);
 struct jesy_element* jesy_get_child(struct jesy_context *ctx, struct jesy_element *element);
-struct jesy_element* jesy_get_right(struct jesy_context *ctx, struct jesy_element *element);
+struct jesy_element* jesy_get_sibling(struct jesy_context *ctx, struct jesy_element *element);
 void jesy_print(struct jesy_context *ctx);
 
-struct jesy_element* jesy_get(struct jesy_context *ctx, struct jesy_element *object, char *key);
+struct jesy_element* jesy_get_key_value(struct jesy_context *ctx, struct jesy_element *object, char *key);
+struct jesy_element* jesy_get_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index);
+
 bool jesy_find(struct jesy_context *ctx, struct jesy_element *object, char *key);
 bool jesy_has(struct jesy_context *ctx, struct jesy_element *object, char *key);
 bool jesy_set(struct jesy_context *ctx, char *key, char *value, uint16_t length);
 enum jesy_node_type jesy_get_type(struct jesy_context *ctx, char *key);
 uint32_t jesy_get_dump_size(struct jesy_context *ctx);
 
-
-#define JESY_ARRAY_FOR_EACH(ctx, element) for(element = (element->type == JESY_ARRAY) ? jesy_get_child(ctx, element) : NULL; element != NULL; element = jesy_get_right(ctx, element))
-
-
+#define JESY_FOR_EACH(ctx_, elem_, type_) for(elem_ = (elem_->type == type_) ? jesy_get_child(ctx_, elem_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))
+#define JESY_ARRAY_FOR_EACH(ctx_, elem_) for(elem_ = (elem_->type == JESY_ARRAY) ? jesy_get_child(ctx_, elem_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))
 
 #endif

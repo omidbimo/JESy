@@ -14,18 +14,17 @@
   #define JESY_MAX_VALUE_LEN 0xFFFF
 #endif
 
+#define JESY_ARRAY_LEN(arr) (sizeof(arr)/sizeof(arr[0]))
 #define UPDATE_TOKEN(tok, type_, offset_, size_) \
   tok.type = type_; \
   tok.offset = offset_; \
   tok.length = size_;
 
-#define LOOK_AHEAD(ctx_) ctx_->json_data[ctx_->offset + 1]
-#define IS_EOF_AHEAD(ctx_) (((ctx_->offset + 1) >= ctx_->json_size) || \
-                            (ctx_->json_data[ctx_->offset + 1] == '\0'))
 #define IS_SPACE(c) ((c==' ') || (c=='\t') || (c=='\r') || (c=='\n'))
 #define IS_DIGIT(c) ((c >= '0') && (c <= '9'))
 #define IS_ESCAPE(c) ((c=='\\') || (c=='\"') || (c=='\/') || (c=='\b') || \
                       (c=='\f') || (c=='\n') || (c=='\r') || (c=='\t') || (c == '\u'))
+#define LOOK_AHEAD(ctx_) (((ctx_->offset + 1) < ctx_->json_size) ? ctx_->json_data[ctx_->offset + 1] : '\0')
 
 #define HAS_PARENT(node_ptr) (node_ptr->parent < JESY_INVALID_INDEX)
 #define HAS_SIBLING(node_ptr) (node_ptr->sibling < JESY_INVALID_INDEX)
@@ -222,6 +221,86 @@ static void jesy_delete_element(struct jesy_context *ctx, struct jesy_element *e
   }
 }
 
+const struct {
+  char symbol;
+  enum jesy_token_type token_type;
+} jesy_symbolic_token_mapping[] = {
+  {'\0', JESY_TOKEN_EOF             },
+  {'{',  JESY_TOKEN_OPENING_BRACKET },
+  {'}',  JESY_TOKEN_CLOSING_BRACKET },
+  {'[',  JESY_TOKEN_OPENING_BRACE   },
+  {']',  JESY_TOKEN_CLOSING_BRACE   },
+  {':',  JESY_TOKEN_COLON           },
+  {',',  JESY_TOKEN_COMMA           },
+  };
+
+static inline bool jesy_get_symbolic_token(struct jesy_context *ctx,
+                                           char ch, struct jesy_token *token)
+{
+  uint32_t idx;
+  for (idx = 0; idx < JESY_ARRAY_LEN(jesy_symbolic_token_mapping); idx++) {
+    if (ch == jesy_symbolic_token_mapping[idx].symbol) {
+      UPDATE_TOKEN((*token), jesy_symbolic_token_mapping[idx].token_type, ctx->offset, 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+static inline bool jesy_is_symbolic_token(struct jesy_context *ctx,
+                                          char ch)
+{
+  uint32_t idx;
+  for (idx = 0; idx < JESY_ARRAY_LEN(jesy_symbolic_token_mapping); idx++) {
+    if (ch == jesy_symbolic_token_mapping[idx].symbol) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static inline bool jesy_get_number_token(struct jesy_context *ctx,
+                                         char ch, struct jesy_token *token)
+{
+  bool tokenizing_completed = false;
+  if (IS_DIGIT(ch)) {
+    token->length++;
+    ch = LOOK_AHEAD(ctx);
+    if (!IS_DIGIT(ch) && (ch != '.')) { /* TODO: more symbols are acceptable in the middle of a number */
+      tokenizing_completed = true;
+    }
+  }
+  else if (ch == '.') {
+    token->length++;
+    if (!IS_DIGIT(LOOK_AHEAD(ctx))) {
+      token->type = JESY_TOKEN_INVALID;
+      tokenizing_completed = true;
+    }
+  }
+  else if (IS_SPACE(ch)) {
+    tokenizing_completed = true;
+  }
+  else {
+    token->type = JESY_TOKEN_INVALID;
+    tokenizing_completed = true;
+  }
+  return tokenizing_completed;
+}
+
+static inline bool jesy_get_specific_token(struct jesy_context *ctx,
+                          struct jesy_token *token, char *cmp_str, uint16_t len)
+{
+  bool tokenizing_completed = false;
+  token->length++;
+  if (token->length == len) {
+    if (0 != (strncmp(&ctx->json_data[token->offset], cmp_str, len))) {
+      token->type = JESY_TOKEN_INVALID;
+    }
+    tokenizing_completed = true;
+  }
+  return tokenizing_completed;
+}
+
 static struct jesy_token jesy_get_token(struct jesy_context *ctx)
 {
   struct jesy_token token = { 0 };
@@ -240,64 +319,30 @@ static struct jesy_token jesy_get_token(struct jesy_context *ctx)
 
     if (!token.type) {
 
-      if (ch == '{') {
-        UPDATE_TOKEN(token, JESY_TOKEN_OPENING_BRACKET, ctx->offset, 1);
-        break;
-      }
-
-      if (ch == '}') {
-        UPDATE_TOKEN(token, JESY_TOKEN_CLOSING_BRACKET, ctx->offset, 1);
-        break;
-      }
-
-      if (ch == '[') {
-        UPDATE_TOKEN(token, JESY_TOKEN_OPENING_BRACE, ctx->offset, 1);
-        break;
-      }
-
-      if (ch == ']') {
-        UPDATE_TOKEN(token, JESY_TOKEN_CLOSING_BRACE, ctx->offset, 1);
-        break;
-      }
-
-      if (ch == ':') {
-        UPDATE_TOKEN(token, JESY_TOKEN_COLON, ctx->offset, 1)
-        break;
-      }
-
-      if (ch == ',') {
-        UPDATE_TOKEN(token, JESY_TOKEN_COMMA, ctx->offset, 1)
+      if (jesy_get_symbolic_token(ctx, ch, &token)) {
         break;
       }
 
       if (ch == '\"') {
-        /* Use offset of next symbol since '\"' won't be a part of token. */
+        /* '\"' won't be a part of token. Use offset of next symbol */
         UPDATE_TOKEN(token, JESY_TOKEN_STRING, ctx->offset + 1, 0);
         continue;
       }
 
       if (IS_DIGIT(ch)) {
         UPDATE_TOKEN(token, JESY_TOKEN_NUMBER, ctx->offset, 1);
-        /* NUMBERs do not have dedicated enclosing symbols like STRINGs.
-           To prevent the tokenizer to consume too much characters, we need to
-           look ahead and stop the process if the jesy_token_type_str character is one of
-           EOF, ',', '}' or ']' */
-        if (IS_EOF_AHEAD(ctx) ||
-            (LOOK_AHEAD(ctx) == '}') ||
-            (LOOK_AHEAD(ctx) == ']') ||
-            (LOOK_AHEAD(ctx) == ',')) {
+        /* Unlike STRINGs, NUMBERs do not have dedicated symbols to indicate the
+           end of data. To avoid consuming non-NUMBER characters, take a look ahead
+           and stop the process in case of non-numeric symbols. */
+        if (jesy_is_symbolic_token(ctx, LOOK_AHEAD(ctx))) {
           break;
         }
         continue;
       }
 
-      if (ch == '-') {
-        if (!IS_EOF_AHEAD(ctx) && IS_DIGIT(LOOK_AHEAD(ctx))) {
-          UPDATE_TOKEN(token, JESY_TOKEN_NUMBER, ctx->offset, 1);
-          continue;
-        }
-        UPDATE_TOKEN(token, JESY_TOKEN_INVALID, ctx->offset, 1);
-        break;
+      if ((ch == '-') && IS_DIGIT(LOOK_AHEAD(ctx))) {
+        UPDATE_TOKEN(token, JESY_TOKEN_NUMBER, ctx->offset, 1);
+        continue;
       }
 
       if (ch == 't') {
@@ -324,66 +369,33 @@ static struct jesy_token jesy_get_token(struct jesy_context *ctx)
       break;
     }
     else if (token.type == JESY_TOKEN_STRING) {
-
-      /* We'll not deliver '\"' symbol as a part of token. */
-      if (ch == '\"') {
+      if (ch == '\"') { /* End of STRING. '\"' symbol isn't a part of token. */
         break;
       }
+      /* TODO: add checking for scape symbols */
       token.length++;
       continue;
     }
     else if (token.type == JESY_TOKEN_NUMBER) {
-
-      if (IS_DIGIT(ch)) {
-        token.length++;
-        if (!IS_DIGIT(LOOK_AHEAD(ctx)) && LOOK_AHEAD(ctx) != '.') {
-          break;
-        }
-        continue;
-      }
-
-      if (ch == '.') {
-        token.length++;
-        if (!IS_DIGIT(LOOK_AHEAD(ctx))) {
-          token.type = JESY_TOKEN_INVALID;
-          break;
-        }
-        continue;
-      }
-
-      if (IS_SPACE(ch)) {
+      if (jesy_get_number_token(ctx, ch, &token)) {
         break;
       }
-
-      token.type = JESY_TOKEN_INVALID;
-      break;
+      continue;
     }
     else if (token.type == JESY_TOKEN_TRUE) {
-      token.length++;
-      if (token.length == (sizeof("true") - 1)) {
-        if (0 != (strncmp(&ctx->json_data[token.offset], "true", (sizeof("true") - 1)))) {
-          token.type = JESY_TOKEN_INVALID;
-        }
+      if (jesy_get_specific_token(ctx, &token, "true", sizeof("true") - 1)) {
         break;
       }
       continue;
     }
     else if (token.type == JESY_TOKEN_FALSE) {
-      token.length++;
-      if (token.length == (sizeof("false") - 1)) {
-        if (0 != (strncmp(&ctx->json_data[token.offset], "false", (sizeof("false") - 1)))) {
-          token.type = JESY_TOKEN_INVALID;
-        }
+      if (jesy_get_specific_token(ctx, &token, "false", sizeof("false") - 1)) {
         break;
       }
       continue;
     }
     else if (token.type == JESY_TOKEN_NULL) {
-      token.length++;
-      if (token.length == (sizeof("null") - 1)) {
-        if (0 != (strncmp(&ctx->json_data[token.offset], "null", (sizeof("null") - 1)))) {
-          token.type = JESY_TOKEN_INVALID;
-        }
+      if (jesy_get_specific_token(ctx, &token, "null", sizeof("null") - 1)) {
         break;
       }
       continue;

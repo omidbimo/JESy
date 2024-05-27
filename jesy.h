@@ -35,16 +35,6 @@ typedef enum jesy_status {
   JESY_UNEXPECTED_EOF,
 } jesy_status;
 
-enum jesy_parser_state {
-  JESY_STATE_START = 0,
-  JESY_STATE_WANT_KEY,
-  JESY_STATE_WANT_VALUE,
-  JESY_STATE_WANT_ARRAY,
-  JESY_STATE_PROPERTY_END,   /* End of key:value pair */
-  JESY_STATE_VALUE_END,      /* End of value inside an array */
-  JESY_STATE_STRUCTURE_END,  /* End of object or array structure */
-};
-
 enum jesy_token_type {
   JESY_TOKEN_EOF = 0,
   JESY_TOKEN_OPENING_BRACKET,
@@ -140,8 +130,6 @@ struct jesy_context {
   uint32_t  capacity;
   /* Index of the last allocated node */
   jesy_node_descriptor  index;
-  /* */
-  enum jesy_parser_state state;
   /* Holds the last token delivered by tokenizer. */
   struct jesy_token token;
   /* Internal node iterator */
@@ -171,7 +159,8 @@ struct jesy_element* jesy_get_array_value(struct jesy_context *ctx, struct jesy_
 bool jesy_find(struct jesy_context *ctx, struct jesy_element *object, char *key);
 bool jesy_has(struct jesy_context *ctx, struct jesy_element *object, char *key);
 bool jesy_set(struct jesy_context *ctx, char *key, char *value, uint16_t length);
-enum jesy_node_type jesy_get_type(struct jesy_context *ctx, char *key);
+enum jesy_type jesy_get_type(struct jesy_context *ctx, char *key);
+enum jesy_type jesy_get_parent_type(struct jesy_context *ctx, struct jesy_element *element);
 uint32_t jesy_get_dump_size(struct jesy_context *ctx);
 
 #define JESY_FOR_EACH(ctx_, elem_, type_) for(elem_ = (elem_->type == type_) ? jesy_get_child(ctx_, elem_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))

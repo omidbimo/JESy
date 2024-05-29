@@ -194,19 +194,16 @@ static struct jesy_element* jesy_add_element(struct jesy_context *ctx,
   return new_element;
 }
 
-static void jesy_delete_element(struct jesy_context *ctx, struct jesy_element *element)
+void jesy_delete_element(struct jesy_context *ctx, struct jesy_element *element)
 {
-  struct jesy_element *iter = NULL;
-  struct jesy_element *parent = NULL;
-  struct jesy_element *prev = NULL;
+  struct jesy_element *iter = element;
 
   if (!jesy_validate_element(ctx, element)) {
     return;
   }
 
-  iter = element;
   while (true) {
-    prev = NULL;
+
     while (HAS_CHILD(iter)) {
       iter = &ctx->pool[iter->first_child];
     }
@@ -215,13 +212,12 @@ static void jesy_delete_element(struct jesy_context *ctx, struct jesy_element *e
       ctx->pool[iter->parent].first_child = iter->sibling;
     }
 
-    if (!HAS_SIBLING(iter) && HAS_PARENT(iter)) {
-        ctx->pool[iter->parent].last_child = JESY_INVALID_INDEX;
+    jesy_free(ctx, iter);
+    if (iter == element) {
+      break;
     }
 
-    jesy_free(ctx, iter);
-    iter = jesy_get_parent(ctx, iter);
-    continue;
+    iter = &ctx->pool[iter->parent];
   }
 }
 
@@ -706,7 +702,7 @@ uint32_t jesy_parse(struct jesy_context *ctx, char *json_data, uint32_t json_len
   return ctx->status;
 }
 
-uint32_t jesy_get_dump_size(struct jesy_context *ctx)
+uint32_t jesy_validate(struct jesy_context *ctx)
 {
   struct jesy_element *iter = ctx->root;
   uint32_t dump_size = 0;
@@ -772,13 +768,13 @@ uint32_t jesy_get_dump_size(struct jesy_context *ctx)
   return dump_size;
 }
 
-uint32_t jesy_serialize(struct jesy_context *ctx, char *buffer, uint32_t length)
+uint32_t jesy_render(struct jesy_context *ctx, char *buffer, uint32_t length)
 {
   char *dst = buffer;
   struct jesy_element *iter = ctx->root;
   uint32_t required_buffer = 0;
 
-  required_buffer = jesy_get_dump_size(ctx);
+  required_buffer = jesy_validate(ctx);
   if (length < required_buffer) {
     ctx->status = JESY_OUT_OF_MEMORY;
     return 0;

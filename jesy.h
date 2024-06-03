@@ -142,11 +142,12 @@ struct jesy_context {
 };
 
 struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size);
+
 uint32_t jesy_parse(struct jesy_context* ctx, char *json_data, uint32_t json_length);
 uint32_t jesy_render(struct jesy_context *ctx, char *dst, uint32_t length);
 uint32_t jesy_validate(struct jesy_context *ctx);
+
 void jesy_delete_element(struct jesy_context *ctx, struct jesy_element *element);
-void jesy_reset_iterator(struct jesy_context *ctx);
 
 struct jesy_element* jesy_get_root(struct jesy_context *ctx);
 struct jesy_element* jesy_get_parent(struct jesy_context *ctx, struct jesy_element *element);

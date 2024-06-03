@@ -1,8 +1,3 @@
-
-
-
-
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +28,12 @@
 #define HAS_PARENT(node_ptr) (node_ptr->parent < JESY_INVALID_INDEX)
 #define HAS_SIBLING(node_ptr) (node_ptr->sibling < JESY_INVALID_INDEX)
 #define HAS_CHILD(node_ptr) (node_ptr->first_child < JESY_INVALID_INDEX)
+
+#define GET_PARENT(ctx_, node_ptr) (HAS_PARENT(node_ptr) ? &ctx_->pool[node_ptr->parent] : NULL)
+#define GET_SIBLING(ctx_, node_ptr) (HAS_SIBLING(node_ptr) ? &ctx_->pool[node_ptr->sibling] : NULL)
+#define GET_CHILD(ctx_, node_ptr) (HAS_CHILD(node_ptr) ? &ctx_->pool[node_ptr->first_child] : NULL)
+
+#define PARENT_TYPE(ctx_, node_ptr) (HAS_PARENT(node_ptr) ? ctx_->pool[node_ptr->parent].type : JESY_NONE)
 
 static struct jesy_element *jesy_find_duplicate_key(struct jesy_context *ctx,
                                                     struct jesy_element *object_node,
@@ -511,8 +512,8 @@ static bool jesy_accept(struct jesy_context *ctx,
     if (ctx->status) return true;
     if (new_node) {
       ctx->iter = new_node;
-      JESY_LOG_NODE(ctx->iter - ctx->pool, ctx->iter->type,
-                    ctx->iter->parent, ctx->iter->sibling, ctx->iter->first_child);
+      JESY_LOG_NODE("    + ", ctx->iter - ctx->pool, ctx->iter->type, ctx->iter->length, ctx->iter->value,
+                    ctx->iter->parent, ctx->iter->sibling, ctx->iter->first_child, "\n");
     }
 
     ctx->token = jesy_get_token(ctx);
@@ -701,71 +702,190 @@ uint32_t jesy_parse(struct jesy_context *ctx, char *json_data, uint32_t json_len
   ctx->iter = ctx->root;
   return ctx->status;
 }
+enum jesy_state {
+  JESY_STATE_NONE,
+  JESY_STATE_WANT_OBJECT,
+  JESY_STATE_WANT_KEY,
+  JESY_STATE_WANT_VALUE,
+  JESY_STATE_WANT_ARRAY_VALUE,
+  JESY_STATE_GOT_ARRAY_VALUE,
+  JESY_STATE_GOT_VALUE,
+  JESY_STATE_GOT_KEY,
+};
 
 uint32_t jesy_validate(struct jesy_context *ctx)
 {
-  struct jesy_element *iter = ctx->root;
-  uint32_t dump_size = 0;
+  uint32_t json_len = 0;
+  enum jesy_state state = JESY_STATE_WANT_OBJECT;
+  ctx->status = JESY_NO_ERR;
 
-  while (iter) {
+  if (!ctx->root) {
+    return 0;
+  }
 
-    if (iter->type == JESY_OBJECT) {
-      dump_size++; /* '{' */
-    }
-    else if (iter->type == JESY_KEY) {
-      dump_size += (iter->length + sizeof(char) * 3);/* +1 for ':' +2 for "" */
-    }
-    else if (iter->type == JESY_STRING) {
-      dump_size += (iter->length + sizeof(char) * 2);/* +2 for "" */
-    }
-    else if ((iter->type == JESY_NUMBER)  ||
-             (iter->type == JESY_TRUE)    ||
-             (iter->type == JESY_FALSE)   ||
-             (iter->type == JESY_NULL)) {
-      dump_size += iter->length;
-    }
-    else if (iter->type == JESY_ARRAY) {
-      dump_size++; /* '[' */
-    }
-    else {
-      assert(0);
-      return 0;
+  ctx->iter = ctx->root;
+
+  do {
+    JESY_LOG_NODE("\n   ", ctx->iter - ctx->pool, ctx->iter->type,ctx->iter->length, ctx->iter->value,
+                  ctx->iter->parent, ctx->iter->sibling, ctx->iter->first_child, "");
+    switch (state) {
+      case JESY_STATE_WANT_OBJECT:
+        if (ctx->iter->type == JESY_OBJECT) {
+          json_len++; /* '{' */
+          state = JESY_STATE_WANT_KEY;
+        }
+        else {
+          ctx->status = JESY_UNEXPECTED_NODE;
+          JESY_LOG_MSG("\n jesy_validate err.1");
+          return 0;
+        }
+        break;
+
+      case JESY_STATE_WANT_KEY:
+        if (ctx->iter->type == JESY_KEY) {
+          json_len += (ctx->iter->length + sizeof(char) * 3);/* +1 for ':' +2 for "" */
+          state = JESY_STATE_WANT_VALUE;
+        }
+        else {
+          ctx->status = JESY_UNEXPECTED_NODE;
+          JESY_LOG_MSG("\n jesy_validate err.2");
+          return 0;
+        }
+        break;
+
+      case JESY_STATE_WANT_VALUE:
+        if (ctx->iter->type == JESY_STRING) {
+            json_len += (ctx->iter->length + sizeof(char) * 2);/* +2 for "" */
+            state = JESY_STATE_GOT_VALUE;
+        }
+        else if ((ctx->iter->type == JESY_NUMBER)  ||
+                 (ctx->iter->type == JESY_TRUE)    ||
+                 (ctx->iter->type == JESY_FALSE)   ||
+                 (ctx->iter->type == JESY_NULL)) {
+          json_len += ctx->iter->length;
+          state = JESY_STATE_GOT_VALUE;
+        }
+        else if (ctx->iter->type == JESY_ARRAY) {
+          json_len++; /* '[' */
+          state = JESY_STATE_WANT_ARRAY_VALUE;
+        }
+        else if (ctx->iter->type == JESY_OBJECT) {
+          json_len++; /* '{' */
+          state = JESY_STATE_WANT_KEY;
+        }
+        else {
+          ctx->status = JESY_UNEXPECTED_NODE;
+          JESY_LOG_MSG("\n jesy_validate err.3");
+          return 0;
+        }
+        break;
+
+      case JESY_STATE_WANT_ARRAY_VALUE:
+        if (ctx->iter->type == JESY_STRING) {
+            json_len += (ctx->iter->length + sizeof(char) * 2);/* +2 for "" */
+        }
+        else if ((ctx->iter->type == JESY_NUMBER)  ||
+                 (ctx->iter->type == JESY_TRUE)    ||
+                 (ctx->iter->type == JESY_FALSE)   ||
+                 (ctx->iter->type == JESY_NULL)) {
+          json_len += ctx->iter->length;
+        }
+        else if (ctx->iter->type == JESY_ARRAY) {
+          json_len++; /* '[' */
+          state = JESY_STATE_WANT_ARRAY_VALUE;
+        }
+        else if (ctx->iter->type == JESY_OBJECT) {
+          json_len++; /* '{' */
+          state = JESY_STATE_WANT_KEY;
+        }
+        else {
+          ctx->status = JESY_UNEXPECTED_NODE;
+          JESY_LOG_MSG("\n jesy_validate err.4");
+          return 0;
+        }
+        break;
+
+      default:
+        assert(0);
+        break;
     }
 
-    if (HAS_CHILD(iter)) {
-      iter = jesy_get_child(ctx, iter);
+    if (HAS_CHILD(ctx->iter)) {
+      ctx->iter = jesy_get_child(ctx, ctx->iter);
       continue;
     }
 
-    if (iter->type == JESY_OBJECT) {
-      dump_size++; /* '}' */
+    /* This covers empty objects */
+    if (ctx->iter->type == JESY_OBJECT) {
+      json_len++; /* '}' */
+    }
+    /* This covers empty arrays */
+    else if (ctx->iter->type == JESY_ARRAY) {
+      json_len++; /* ']' */
     }
 
-    else if (iter->type == JESY_ARRAY) {
-      dump_size++; /* ']' */
-    }
-
-    if (HAS_SIBLING(iter)) {
-      iter = jesy_get_sibling(ctx, iter);
-      dump_size++; /* ',' */
-      continue;
-    }
-
-    while ((iter = jesy_get_parent(ctx, iter))) {
-      if (iter->type == JESY_OBJECT) {
-        dump_size++; /* '}' */
+    /* We've got an array */
+    if (HAS_SIBLING(ctx->iter)) {
+      if (ctx->iter->type != JESY_KEY) {
+        ctx->iter = &ctx->pool[ctx->iter->sibling];
+        json_len++; /* ',' */
+        continue;
       }
-      else if (iter->type == JESY_ARRAY) {
-        dump_size++; /* ']' */
+      else {
+        ctx->status = JESY_UNEXPECTED_NODE;
+        JESY_LOG_MSG("\n jesy_validate err.5");
+        return 0;
       }
-      if (HAS_SIBLING(iter)) {
-        iter = jesy_get_sibling(ctx, iter);
-        dump_size++; /* ',' */
+    }
+
+    while (HAS_PARENT(ctx->iter)) {
+      /* A key without value is invalid. */
+      if (PARENT_TYPE(ctx, ctx->iter) == JESY_KEY) {
+        state = JESY_STATE_GOT_VALUE;
+      }
+
+      ctx->iter = GET_PARENT(ctx, ctx->iter);
+      if (ctx->iter->type == JESY_KEY) {
+        if (state != JESY_STATE_GOT_VALUE) {
+          ctx->status = JESY_UNEXPECTED_NODE;
+          JESY_LOG_MSG("\n jesy_validate err.6");
+          return 0;
+        }
+        state = JESY_STATE_GOT_KEY;
+      }
+      else if (ctx->iter->type == JESY_OBJECT) {
+        if (state != JESY_STATE_GOT_KEY) {
+          ctx->status = JESY_UNEXPECTED_NODE;
+          JESY_LOG_MSG("\n jesy_validate err.7");
+          return 0;
+        }
+        json_len++; /* '}' */
+      }
+      else if (ctx->iter->type == JESY_ARRAY) {
+        json_len++; /* ']' */
+      }
+
+      if (HAS_SIBLING(ctx->iter)) {
+        json_len++; /* ',' */
+        if (PARENT_TYPE(ctx, ctx->iter) == JESY_OBJECT) {
+          state = JESY_STATE_WANT_KEY;
+        }
+        else if (PARENT_TYPE(ctx, ctx->iter) == JESY_ARRAY) {
+          state = JESY_STATE_WANT_ARRAY_VALUE;
+        }
+        else {
+          ctx->status = JESY_UNEXPECTED_NODE;
+          JESY_LOG_MSG("\n jesy_validate err.8");
+          return 0;
+        }
+        ctx->iter = GET_SIBLING(ctx, ctx->iter);
         break;
       }
     }
-  }
-  return dump_size;
+  } while (ctx->iter != ctx->root);
+
+  ctx->iter = ctx->root;
+  return json_len;
 }
 
 uint32_t jesy_render(struct jesy_context *ctx, char *buffer, uint32_t length)
@@ -858,11 +978,6 @@ struct jesy_element* jesy_get_root(struct jesy_context *ctx)
     return ctx->root;
   }
   return NULL;
-}
-
-void jesy_reset_iterator(struct jesy_context *ctx)
-{
-  ctx->iter = ctx->root;
 }
 
 struct jesy_element* jesy_get_key_value(struct jesy_context *ctx, struct jesy_element *object, char *key)

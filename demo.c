@@ -122,9 +122,28 @@ int main(void)
   element = jesy_get_key_value(ctx, root, "e");
   if (element) { printf("\n \"e\": %.*s <%s>", element->length, element->value, jesy_node_type_str[element->type]); }
 
+  ctx = jesy_init_context(mem_pool, sizeof(mem_pool));
+  if (!ctx) {
+    printf("\n Context initiation failed!");
+    return -1;
+  }
+  struct jesy_element *it = NULL;
+  it = jesy_add_object(ctx, it);
+  it = jesy_add_key(ctx, it, "Key");
+  it = jesy_add_value(ctx, it, JESY_STRING, "value");
+  it = jesy_get_root(ctx);
+  it = jesy_add_key(ctx, it, "key2");
+  it = jesy_add_array(ctx, it);
+  jesy_add_value_true(ctx, it);
+  jesy_add_value_false(ctx, it);
+  jesy_add_value_null(ctx, it);
+  jesy_add_value_number(ctx, it, "123.67");
 
-
-
+  out_size = jesy_validate(ctx);
+  printf("\n    Validation Error: %d - %s, size: %d", ctx->status, jesy_status_str[ctx->status], out_size);
+  out_size = jesy_render(ctx, output, sizeof(output));
+  printf("\n    Render Error: %d - %s, size: %d", ctx->status, jesy_status_str[ctx->status], out_size);
+  printf("\n%.*s", out_size, output);
 
   return 0;
 }

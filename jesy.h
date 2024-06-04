@@ -33,6 +33,7 @@ typedef enum jesy_status {
   JESY_UNEXPECTED_TOKEN,
   JESY_UNEXPECTED_NODE,
   JESY_UNEXPECTED_EOF,
+  JESY_INVALID_PARAMETER,
 } jesy_status;
 
 enum jesy_token_type {
@@ -163,6 +164,16 @@ bool jesy_has(struct jesy_context *ctx, struct jesy_element *object, char *key);
 bool jesy_set(struct jesy_context *ctx, char *key, char *value, uint16_t length);
 enum jesy_type jesy_get_type(struct jesy_context *ctx, char *key);
 enum jesy_type jesy_get_parent_type(struct jesy_context *ctx, struct jesy_element *element);
+
+struct jesy_element* jesy_add_object(struct jesy_context *ctx, struct jesy_element *parent);
+struct jesy_element* jesy_add_array(struct jesy_context *ctx, struct jesy_element *parent);
+struct jesy_element* jesy_add_key(struct jesy_context *ctx, struct jesy_element *parent, char *key);
+struct jesy_element* jesy_add_value(struct jesy_context *ctx, struct jesy_element *parent, enum jesy_type type, char *value);
+struct jesy_element* jesy_add_value_string(struct jesy_context *ctx, struct jesy_element *parent, char *value);
+struct jesy_element* jesy_add_value_number(struct jesy_context *ctx, struct jesy_element *parent, char *value);
+struct jesy_element* jesy_add_value_true(struct jesy_context *ctx, struct jesy_element *parent);
+struct jesy_element* jesy_add_value_false(struct jesy_context *ctx, struct jesy_element *parent);
+struct jesy_element* jesy_add_value_null(struct jesy_context *ctx, struct jesy_element *parent);
 
 
 #define JESY_FOR_EACH(ctx_, elem_, type_) for(elem_ = (elem_->type == type_) ? jesy_get_child(ctx_, elem_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))

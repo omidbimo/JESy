@@ -161,18 +161,18 @@ static struct jesy_element* jesy_get_structure_parent_node(struct jesy_context *
   return parent;
 }
 
-static struct jesy_element* jesy_add_element(struct jesy_context *ctx,
-                                             struct jesy_element *parent,
-                                             uint16_t type,
-                                             uint32_t offset,
-                                             uint16_t length)
+static struct jesy_element* jesy_append_element(struct jesy_context *ctx,
+                                                struct jesy_element *parent,
+                                                uint16_t type,
+                                                uint16_t length,
+                                                char *value)
 {
   struct jesy_element *new_element = jesy_allocate(ctx);
 
   if (new_element) {
     new_element->type = type;
     new_element->length = length;
-    new_element->value = &ctx->json_data[offset];
+    new_element->value = value;
 
     if (parent) {
       new_element->parent = (jesy_node_descriptor)(parent - ctx->pool); /* parent's index */
@@ -455,21 +455,21 @@ static bool jesy_accept(struct jesy_context *ctx,
       else
 #endif
       {
-        new_node = jesy_add_element(ctx, ctx->iter, element_type, ctx->token.offset, ctx->token.length);
+        new_node = jesy_append_element(ctx, ctx->iter, element_type, ctx->token.length, &ctx->json_data[ctx->token.offset]);
       }
     }
     else if ((element_type == JESY_OBJECT) ||
              (element_type == JESY_ARRAY)) {
-      new_node = jesy_add_element(ctx, ctx->iter, element_type, ctx->token.offset, ctx->token.length);
+      new_node = jesy_append_element(ctx, ctx->iter, element_type, ctx->token.length, &ctx->json_data[ctx->token.offset]);
     }
     else if (element_type == JESY_STRING) {
-      new_node = jesy_add_element(ctx, ctx->iter, element_type, ctx->token.offset, ctx->token.length);
+      new_node = jesy_append_element(ctx, ctx->iter, element_type, ctx->token.length, &ctx->json_data[ctx->token.offset]);
     }
     else if ((element_type == JESY_NUMBER)  ||
              (element_type == JESY_TRUE)    ||
              (element_type == JESY_FALSE)   ||
              (element_type == JESY_NULL)) {
-      new_node = jesy_add_element(ctx, ctx->iter, element_type, ctx->token.offset, ctx->token.length);
+      new_node = jesy_append_element(ctx, ctx->iter, element_type, ctx->token.length, &ctx->json_data[ctx->token.offset]);
     }
     else { /* JESY_NONE */
        /* None-Key/Value tokens trigger upward iteration to the parent node.
@@ -548,8 +548,8 @@ struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size)
   }
 
   struct jesy_context *ctx = mem_pool;
-
-  ctx->status = 0;
+  memset(ctx, 0, sizeof(*ctx));
+  ctx->status = JESY_NO_ERR;
   ctx->node_count = 0;
 
   ctx->json_data = NULL;
@@ -564,6 +564,7 @@ struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size)
 
   ctx->iter = NULL;
   ctx->root = NULL;
+  ctx->free = NULL;
 
 #ifndef NDEBUG
   printf("\nallocator capacity is %d nodes", ctx->capacity);
@@ -902,6 +903,7 @@ uint32_t jesy_render(struct jesy_context *ctx, char *buffer, uint32_t length)
   if (required_buffer == 0) {
     return 0;
   }
+  buffer[0] = '\0';
 
   while (iter) {
 
@@ -1025,4 +1027,68 @@ bool jesy_set(struct jesy_context *ctx, char *key, char *value, uint16_t length)
 
 
 
+}
+
+struct jesy_element* jesy_add_element(struct jesy_context *ctx, struct jesy_element *parent, enum jesy_type type, uint16_t length, char *value)
+{
+  if (!ctx) {
+    ctx->status = JESY_INVALID_PARAMETER;
+    return NULL;
+  }
+
+  if (!parent && ctx->root) { /* JSON is not empty. Invalid request. */
+    ctx->status = JESY_INVALID_PARAMETER;
+    return NULL;
+  }
+
+  if (parent && !jesy_validate_element(ctx, parent)) {
+    ctx->status = JESY_INVALID_PARAMETER;
+    return NULL;
+  }
+  return jesy_append_element(ctx, parent, type, length, value);
+}
+
+struct jesy_element* jesy_add_object(struct jesy_context *ctx, struct jesy_element *parent)
+{
+  return jesy_add_element(ctx, parent, JESY_OBJECT, 0, NULL);
+}
+
+struct jesy_element* jesy_add_array(struct jesy_context *ctx, struct jesy_element *parent)
+{
+  return jesy_add_element(ctx, parent, JESY_ARRAY, 0, NULL);
+}
+
+struct jesy_element* jesy_add_key(struct jesy_context *ctx, struct jesy_element *parent, char *key)
+{
+  return jesy_add_element(ctx, parent, JESY_KEY, strlen(key), key);
+}
+
+struct jesy_element* jesy_add_value(struct jesy_context *ctx, struct jesy_element *parent, enum jesy_type type, char *value)
+{
+  return jesy_add_element(ctx, parent, type, strlen(value), value);
+}
+
+struct jesy_element* jesy_add_value_string(struct jesy_context *ctx, struct jesy_element *parent, char *value)
+{
+  return jesy_add_value(ctx, parent, JESY_STRING, value);
+}
+
+struct jesy_element* jesy_add_value_number(struct jesy_context *ctx, struct jesy_element *parent, char *value)
+{
+  return jesy_add_value(ctx, parent, JESY_NUMBER, value);
+}
+
+struct jesy_element* jesy_add_value_true(struct jesy_context *ctx, struct jesy_element *parent)
+{
+  return jesy_add_value(ctx, parent, JESY_TRUE, "true");
+}
+
+struct jesy_element* jesy_add_value_false(struct jesy_context *ctx, struct jesy_element *parent)
+{
+  return jesy_add_value(ctx, parent, JESY_FALSE, "false");
+}
+
+struct jesy_element* jesy_add_value_null(struct jesy_context *ctx, struct jesy_element *parent)
+{
+  return jesy_add_value(ctx, parent, JESY_NULL, "null");
 }

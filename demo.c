@@ -129,7 +129,7 @@ int main(void)
   }
   struct jesy_element *it = NULL;
   it = jesy_add_object(ctx, it);
-  it = jesy_add_key(ctx, it, "Key");
+  it = jesy_add_key(ctx, it, "key");
   it = jesy_add_value(ctx, it, JESY_STRING, "value");
   it = jesy_get_root(ctx);
   it = jesy_add_key(ctx, it, "key2");
@@ -145,5 +145,17 @@ int main(void)
   printf("\n    Render Error: %d - %s, size: %d", ctx->status, jesy_status_str[ctx->status], out_size);
   printf("\n%.*s", out_size, output);
 
+  jesy_update_key(ctx, jesy_get_root(ctx), "key", "new_key");
+  it = jesy_get_key(ctx, jesy_get_root(ctx), "new_key");
+  jesy_update_key_value(ctx, it, JESY_STRING, "new_value");
+
+  it = jesy_get_key(ctx, jesy_get_root(ctx), "key2");
+  jesy_update_key_value(ctx, it, JESY_NULL, "null");
+
+  out_size = jesy_validate(ctx);
+  printf("\n    Validation Error: %d - %s, size: %d", ctx->status, jesy_status_str[ctx->status], out_size);
+  out_size = jesy_render(ctx, output, sizeof(output));
+  printf("\n    Render Error: %d - %s, size: %d", ctx->status, jesy_status_str[ctx->status], out_size);
+  printf("\n%.*s", out_size, output);
   return 0;
 }

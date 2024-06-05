@@ -34,6 +34,7 @@ typedef enum jesy_status {
   JESY_UNEXPECTED_NODE,
   JESY_UNEXPECTED_EOF,
   JESY_INVALID_PARAMETER,
+  JESY_ELEMENT_NOT_FOUND,
 } jesy_status;
 
 enum jesy_token_type {
@@ -147,6 +148,7 @@ struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size);
 uint32_t jesy_parse(struct jesy_context* ctx, char *json_data, uint32_t json_length);
 uint32_t jesy_render(struct jesy_context *ctx, char *dst, uint32_t length);
 uint32_t jesy_validate(struct jesy_context *ctx);
+void jesy_print(struct jesy_context *ctx);
 
 void jesy_delete_element(struct jesy_context *ctx, struct jesy_element *element);
 
@@ -154,8 +156,9 @@ struct jesy_element* jesy_get_root(struct jesy_context *ctx);
 struct jesy_element* jesy_get_parent(struct jesy_context *ctx, struct jesy_element *element);
 struct jesy_element* jesy_get_child(struct jesy_context *ctx, struct jesy_element *element);
 struct jesy_element* jesy_get_sibling(struct jesy_context *ctx, struct jesy_element *element);
-void jesy_print(struct jesy_context *ctx);
 
+
+struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element *object, char *key);
 struct jesy_element* jesy_get_key_value(struct jesy_context *ctx, struct jesy_element *object, char *key);
 struct jesy_element* jesy_get_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index);
 
@@ -175,6 +178,9 @@ struct jesy_element* jesy_add_value_true(struct jesy_context *ctx, struct jesy_e
 struct jesy_element* jesy_add_value_false(struct jesy_context *ctx, struct jesy_element *parent);
 struct jesy_element* jesy_add_value_null(struct jesy_context *ctx, struct jesy_element *parent);
 
+uint32_t jesy_update_key(struct jesy_context *ctx, struct jesy_element *object, char *key, char *new);
+uint32_t jesy_update_key_value(struct jesy_context *ctx, struct jesy_element *key, enum jesy_type type, char *value);
+uint32_t jesy_update_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, char *value);
 
 #define JESY_FOR_EACH(ctx_, elem_, type_) for(elem_ = (elem_->type == type_) ? jesy_get_child(ctx_, elem_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))
 #define JESY_ARRAY_FOR_EACH(ctx_, elem_) for(elem_ = (elem_->type == JESY_ARRAY) ? jesy_get_child(ctx_, elem_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))

@@ -148,9 +148,12 @@ int main(void)
   jesy_update_key(ctx, jesy_get_root(ctx), "key", "new_key");
   it = jesy_get_key(ctx, jesy_get_root(ctx), "new_key");
   jesy_update_key_value(ctx, it, JESY_STRING, "new_value");
-
+#if 0
   it = jesy_get_key(ctx, jesy_get_root(ctx), "key2");
   jesy_update_key_value(ctx, it, JESY_NULL, "null");
+#endif
+  it = jesy_get_key_value(ctx, jesy_get_root(ctx), "key2");
+  jesy_update_array_value(ctx, it, 3, JESY_NUMBER, "-4");
 
   out_size = jesy_validate(ctx);
   printf("\n    Validation Error: %d - %s, size: %d", ctx->status, jesy_status_str[ctx->status], out_size);

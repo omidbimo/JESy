@@ -100,7 +100,6 @@ struct jesy_element {
      actual value of the node. See jesy.h */
   /* Index */
   jesy_node_descriptor last_child;
-
 };
 
 struct jesy_token {
@@ -143,31 +142,92 @@ struct jesy_context {
   struct jesy_free_node *free;
 };
 
+/* Initialize a new JESy context. The context contains the required data for both
+ * parser and renderer.
+ * param [in] mem_pool a buffer to hold the context and JSON tree nodes
+ * param [in] pool_size size of the mem_pool must be at least the size of context
+ *
+ * return pointer to context or NULL in case of a failure.
+ */
 struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size);
 
+/* Parse a string JSON and generate a tree of JSON elements.
+ * param [in] ctx is an initialized context
+ * param [in] json_data in form of string no need to be NUL terminated.
+ * param [in] json_length is the size of json to be parsed.
+ *
+ * return status of the parsing process see: enum jesy_status
+ *
+ * note: the return value is also available in ctx->status
+ */
 uint32_t jesy_parse(struct jesy_context* ctx, char *json_data, uint32_t json_length);
-uint32_t jesy_render(struct jesy_context *ctx, char *dst, uint32_t length);
-uint32_t jesy_validate(struct jesy_context *ctx);
-void jesy_print(struct jesy_context *ctx);
 
+/* Render a tree of JSON elements into the destination buffer as a non-NUL terminated string.
+ * param [in] ctx the Jesy context containing a JSON tree.
+ * param [in] dst the destination buffer to hold the JSON string.
+ * param [in] length is the size of destination buffer in bytes.
+ *
+ * return the size of JSON string. If zero, there where probably a failure. Check the ctx->status
+ *
+ * note: The output JSON is totally compact without any space characters.
+ * note: It's possible to get the size of JSON string by calling the evaluate function.
+ */
+uint32_t jesy_render(struct jesy_context *ctx, char *dst, uint32_t length);
+
+/* Evaluates a tree of JSON elements to check if the structure is correct. Additionally
+ * calculates the size of the rendered JSON.
+ * param [in] ctx the Jesy context containing a JSON tree.
+ *
+ * return the required buffer size to render the JSON into string. If zero,
+          there might be failures in the tree. Check ctx->status.
+ */
+uint32_t jesy_evaluate(struct jesy_context *ctx);
+
+/* Deletes an element, containing all of its sub-elements. */
 void jesy_delete_element(struct jesy_context *ctx, struct jesy_element *element);
 
+/* Delivers the root element of the JSOn tree.
+ * Returning a NULL is meaning that the tree is empty. */
 struct jesy_element* jesy_get_root(struct jesy_context *ctx);
+/* Delivers the parent element of given JSON element */
 struct jesy_element* jesy_get_parent(struct jesy_context *ctx, struct jesy_element *element);
+/* Delivers the first child of given JSON element */
 struct jesy_element* jesy_get_child(struct jesy_context *ctx, struct jesy_element *element);
+/* Delivers the sibling of given JSON element */
 struct jesy_element* jesy_get_sibling(struct jesy_context *ctx, struct jesy_element *element);
 
-
-struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element *object, char *key);
-struct jesy_element* jesy_get_key_value(struct jesy_context *ctx, struct jesy_element *object, char *key);
-struct jesy_element* jesy_get_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index);
-
-bool jesy_find(struct jesy_context *ctx, struct jesy_element *object, char *key);
-bool jesy_has(struct jesy_context *ctx, struct jesy_element *object, char *key);
-bool jesy_set(struct jesy_context *ctx, char *key, char *value, uint16_t length);
-enum jesy_type jesy_get_type(struct jesy_context *ctx, char *key);
 enum jesy_type jesy_get_parent_type(struct jesy_context *ctx, struct jesy_element *element);
 
+/* Returns a Key element inside the given object.
+ * param [in] ctx
+ * param [in] object is a JSON element of type JESY_OBJECT
+ * param [in] key_name is a NUL-terminated key name
+ *
+ * return a JESY_KEY element or NULL if the key is not found in the object.
+ *
+ * note: the function doesn't perform a whole tree search to find the requested key.
+ *       Only the keys directly under the given object will be checked.
+ */
+struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element *object, char *key_name);
+
+/*
+ *
+ */
+struct jesy_element* jesy_get_value_bykey(struct jesy_context *ctx, struct jesy_element *key);
+
+/*
+ *
+ */
+struct jesy_element* jesy_get_value_bykeyname(struct jesy_context *ctx, struct jesy_element *object, char *key_name);
+
+/*
+ *
+ */
+struct jesy_element* jesy_get_value_byarray(struct jesy_context *ctx, struct jesy_element *array, int16_t index);
+
+/*
+ *
+ */
 struct jesy_element* jesy_add_object(struct jesy_context *ctx, struct jesy_element *parent);
 struct jesy_element* jesy_add_array(struct jesy_context *ctx, struct jesy_element *parent);
 struct jesy_element* jesy_add_key(struct jesy_context *ctx, struct jesy_element *parent, char *key);
@@ -177,10 +237,13 @@ struct jesy_element* jesy_add_value_number(struct jesy_context *ctx, struct jesy
 struct jesy_element* jesy_add_value_true(struct jesy_context *ctx, struct jesy_element *parent);
 struct jesy_element* jesy_add_value_false(struct jesy_context *ctx, struct jesy_element *parent);
 struct jesy_element* jesy_add_value_null(struct jesy_context *ctx, struct jesy_element *parent);
-
+/*
+ *
+ */
 uint32_t jesy_update_key(struct jesy_context *ctx, struct jesy_element *object, char *key, char *new);
-uint32_t jesy_update_key_value(struct jesy_context *ctx, struct jesy_element *key, enum jesy_type type, char *value);
-uint32_t jesy_update_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, char *value);
+uint32_t jesy_update_value_bykey(struct jesy_context *ctx, struct jesy_element *key, enum jesy_type type, char *value);
+uint32_t jesy_update_value_bykeyname(struct jesy_context *ctx, struct jesy_element *object, char *key_name, enum jesy_type type, char *value);
+uint32_t jesy_update_value_byarray(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, char *value);
 
 #define JESY_FOR_EACH(ctx_, elem_, type_) for(elem_ = (elem_->type == type_) ? jesy_get_child(ctx_, elem_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))
 #define JESY_ARRAY_FOR_EACH(ctx_, elem_) for(elem_ = (elem_->type == JESY_ARRAY) ? jesy_get_child(ctx_, elem_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))

@@ -714,7 +714,7 @@ enum jesy_state {
   JESY_STATE_GOT_KEY,
 };
 
-uint32_t jesy_validate(struct jesy_context *ctx)
+uint32_t jesy_evaluate(struct jesy_context *ctx)
 {
   uint32_t json_len = 0;
   enum jesy_state state = JESY_STATE_WANT_OBJECT;
@@ -737,7 +737,7 @@ uint32_t jesy_validate(struct jesy_context *ctx)
         }
         else {
           ctx->status = JESY_UNEXPECTED_NODE;
-          JESY_LOG_MSG("\n jesy_validate err.1");
+          JESY_LOG_MSG("\n jesy_evaluate err.1");
           return 0;
         }
         break;
@@ -749,7 +749,7 @@ uint32_t jesy_validate(struct jesy_context *ctx)
         }
         else {
           ctx->status = JESY_UNEXPECTED_NODE;
-          JESY_LOG_MSG("\n jesy_validate err.2");
+          JESY_LOG_MSG("\n jesy_evaluate err.2");
           return 0;
         }
         break;
@@ -776,7 +776,7 @@ uint32_t jesy_validate(struct jesy_context *ctx)
         }
         else {
           ctx->status = JESY_UNEXPECTED_NODE;
-          JESY_LOG_MSG("\n jesy_validate err.3");
+          JESY_LOG_MSG("\n jesy_evaluate err.3");
           return 0;
         }
         break;
@@ -801,7 +801,7 @@ uint32_t jesy_validate(struct jesy_context *ctx)
         }
         else {
           ctx->status = JESY_UNEXPECTED_NODE;
-          JESY_LOG_MSG("\n jesy_validate err.4");
+          JESY_LOG_MSG("\n jesy_evaluate err.4");
           return 0;
         }
         break;
@@ -834,7 +834,7 @@ uint32_t jesy_validate(struct jesy_context *ctx)
       }
       else {
         ctx->status = JESY_UNEXPECTED_NODE;
-        JESY_LOG_MSG("\n jesy_validate err.5");
+        JESY_LOG_MSG("\n jesy_evaluate err.5");
         return 0;
       }
     }
@@ -849,7 +849,7 @@ uint32_t jesy_validate(struct jesy_context *ctx)
       if (ctx->iter->type == JESY_KEY) {
         if (state != JESY_STATE_GOT_VALUE) {
           ctx->status = JESY_UNEXPECTED_NODE;
-          JESY_LOG_MSG("\n jesy_validate err.6");
+          JESY_LOG_MSG("\n jesy_evaluate err.6");
           return 0;
         }
         state = JESY_STATE_GOT_KEY;
@@ -857,7 +857,7 @@ uint32_t jesy_validate(struct jesy_context *ctx)
       else if (ctx->iter->type == JESY_OBJECT) {
         if (state != JESY_STATE_GOT_KEY) {
           ctx->status = JESY_UNEXPECTED_NODE;
-          JESY_LOG_MSG("\n jesy_validate err.7");
+          JESY_LOG_MSG("\n jesy_evaluate err.7");
           return 0;
         }
         json_len++; /* '}' */
@@ -876,7 +876,7 @@ uint32_t jesy_validate(struct jesy_context *ctx)
         }
         else {
           ctx->status = JESY_UNEXPECTED_NODE;
-          JESY_LOG_MSG("\n jesy_validate err.8");
+          JESY_LOG_MSG("\n jesy_evaluate err.8");
           return 0;
         }
         ctx->iter = GET_SIBLING(ctx, ctx->iter);
@@ -895,7 +895,7 @@ uint32_t jesy_render(struct jesy_context *ctx, char *buffer, uint32_t length)
   struct jesy_element *iter = ctx->root;
   uint32_t required_buffer = 0;
 
-  required_buffer = jesy_validate(ctx);
+  required_buffer = jesy_evaluate(ctx);
   if (length < required_buffer) {
     ctx->status = JESY_OUT_OF_MEMORY;
     return 0;
@@ -983,20 +983,20 @@ struct jesy_element* jesy_get_root(struct jesy_context *ctx)
 }
 
 
-struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element *object, char *key)
+struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element *object, char *key_name)
 {
   struct jesy_element *key_element = NULL;
   struct jesy_element *iter = NULL;
-  uint32_t key_len = (uint16_t)strnlen(key, 0xFFFF);
+  uint32_t key_len = (uint16_t)strnlen(key_name, 0xFFFF);
 
-  if (ctx && object && key && jesy_validate_element(ctx, object)) {
+  if (ctx && object && key_name && jesy_validate_element(ctx, object)) {
     if (object->type != JESY_OBJECT) {
       return NULL;
     }
 
     iter = GET_CHILD(ctx, object);
     while (iter) {
-      if ((iter->length == key_len) && (0 == strncmp(iter->value, key, key_len))) {
+      if ((iter->length == key_len) && (0 == strncmp(iter->value, key_name, key_len))) {
         if (iter->type == JESY_KEY) {
           key_element = iter;
         }
@@ -1008,17 +1008,29 @@ struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element 
   return key_element;
 }
 
-struct jesy_element* jesy_get_key_value(struct jesy_context *ctx, struct jesy_element *object, char *key)
+struct jesy_element* jesy_get_value_bykey(struct jesy_context *ctx, struct jesy_element *key)
 {
   struct jesy_element *value_element = NULL;
-  struct jesy_element *iter = jesy_get_key(ctx, object, key);
-  if (iter) {
-    value_element = GET_CHILD(ctx, iter);
+
+  if (ctx && key && jesy_validate_element(ctx, key)) {
+    if (key->type == JESY_KEY) {
+      value_element = GET_CHILD(ctx, key);
+    }
   }
   return value_element;
 }
 
-struct jesy_element* jesy_get_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index)
+struct jesy_element* jesy_get_value_bykeyname(struct jesy_context *ctx, struct jesy_element *object, char *key_name)
+{
+  struct jesy_element *value_element = NULL;
+  struct jesy_element *key = jesy_get_key(ctx, object, key_name);
+  if (key) {
+    value_element = GET_CHILD(ctx, key);
+  }
+  return value_element;
+}
+
+struct jesy_element* jesy_get_value_byarray(struct jesy_context *ctx, struct jesy_element *array, int16_t index)
 {
   struct jesy_element *iter = NULL;
   if (ctx && array && jesy_validate_element(ctx, array)) {
@@ -1113,7 +1125,7 @@ uint32_t jesy_update_key(struct jesy_context *ctx, struct jesy_element *object, 
   return result;
 }
 
-uint32_t jesy_update_key_value(struct jesy_context *ctx, struct jesy_element *key, enum jesy_type type, char *value)
+uint32_t jesy_update_value_bykey(struct jesy_context *ctx, struct jesy_element *key, enum jesy_type type, char *value)
 {
   uint32_t result = JESY_INVALID_PARAMETER;
 
@@ -1133,10 +1145,27 @@ uint32_t jesy_update_key_value(struct jesy_context *ctx, struct jesy_element *ke
   return result;
 }
 
-uint32_t jesy_update_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, char *value)
+uint32_t jesy_update_value_bykeyname(struct jesy_context *ctx, struct jesy_element *object, char *key_name, enum jesy_type type, char *value)
+{
+  uint32_t result = JESY_INVALID_PARAMETER;
+
+  struct jesy_element *key = jesy_get_key(ctx, object, key_name);
+  if (key) {
+    jesy_delete_element(ctx, GET_CHILD(ctx, key));
+    if (jesy_add_value(ctx, key, type, value)) {
+      result = JESY_NO_ERR;
+    }
+    else {
+      result = ctx->status;
+    }
+  }
+  return result;
+}
+
+uint32_t jesy_update_value_byarray(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, char *value)
 {
   uint32_t result = JESY_ELEMENT_NOT_FOUND;
-  struct jesy_element *value_element = jesy_get_array_value(ctx, array, index);
+  struct jesy_element *value_element = jesy_get_value_byarray(ctx, array, index);
   if (value_element) {
     while (HAS_CHILD(value_element)) {
       jesy_delete_element(ctx, GET_CHILD(ctx, value_element));

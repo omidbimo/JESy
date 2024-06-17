@@ -512,8 +512,8 @@ static bool jesy_accept(struct jesy_context *ctx,
     if (ctx->status) return true;
     if (new_node) {
       ctx->iter = new_node;
-      JESY_LOG_NODE("    + ", ctx->iter - ctx->pool, ctx->iter->type, ctx->iter->length, ctx->iter->value,
-                    ctx->iter->parent, ctx->iter->sibling, ctx->iter->first_child, "\n");
+      JESY_LOG_NODE("\n    + ", ctx->iter - ctx->pool, ctx->iter->type, ctx->iter->length, ctx->iter->value,
+                    ctx->iter->parent, ctx->iter->sibling, ctx->iter->first_child, "");
     }
 
     ctx->token = jesy_get_token(ctx);

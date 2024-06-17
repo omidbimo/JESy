@@ -203,31 +203,24 @@ enum jesy_type jesy_get_parent_type(struct jesy_context *ctx, struct jesy_elemen
  * param [in] object is a JSON element of type JESY_OBJECT
  * param [in] key_name is a NUL-terminated key name
  *
- * return a JESY_KEY element or NULL if the key is not found in the object.
+ * return an element of type JESY_KEY or NULL if the key is not found in the object.
  *
  * note: the function doesn't perform a whole tree search to find the requested key.
  *       Only the keys directly under the given object will be checked.
  */
 struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element *object, char *key_name);
 
-/*
- *
- */
+/* Returns value element of a given key element. NULL if element has no value yet. */
 struct jesy_element* jesy_get_value_bykey(struct jesy_context *ctx, struct jesy_element *key);
 
-/*
- *
- */
+/* Returns value element of a given key name. NULL if element has no value yet.  */
 struct jesy_element* jesy_get_value_bykeyname(struct jesy_context *ctx, struct jesy_element *object, char *key_name);
 
-/*
- *
- */
+/* Returns value element of a given array element. NULL if element has no value yet. */
 struct jesy_element* jesy_get_value_byarray(struct jesy_context *ctx, struct jesy_element *array, int16_t index);
 
-/*
- *
- */
+/* Add an object to a given parent element. Possible acceptable parent elements are JESY_KEY and JESY_ARRAY.
+ * return a status code of type enum jesy_status */
 struct jesy_element* jesy_add_object(struct jesy_context *ctx, struct jesy_element *parent);
 struct jesy_element* jesy_add_array(struct jesy_context *ctx, struct jesy_element *parent);
 struct jesy_element* jesy_add_key(struct jesy_context *ctx, struct jesy_element *parent, char *key);
@@ -237,10 +230,14 @@ struct jesy_element* jesy_add_value_number(struct jesy_context *ctx, struct jesy
 struct jesy_element* jesy_add_value_true(struct jesy_context *ctx, struct jesy_element *parent);
 struct jesy_element* jesy_add_value_false(struct jesy_context *ctx, struct jesy_element *parent);
 struct jesy_element* jesy_add_value_null(struct jesy_context *ctx, struct jesy_element *parent);
-/*
- *
- */
-uint32_t jesy_update_key(struct jesy_context *ctx, struct jesy_element *object, char *key, char *new);
+/* Update the name of a key element giving its parent object.
+ * note: The new key name will not be copied and must be non-retentive for the life time of jesy_context.
+ * return a status code of type enum jesy_status */
+uint32_t jesy_update_key_bykey(struct jesy_context *ctx, struct jesy_element *object, struct jesy_element *key, char *new);
+/* Update the name of a key element giving its current name and its parent object.
+ * note: The new key name will not be copied and must be non-retentive for the life time of jesy_context.
+ * return a status code of type enum jesy_status */
+uint32_t jesy_update_key_bykeyname(struct jesy_context *ctx, struct jesy_element *object, char *key, char *new);
 uint32_t jesy_update_value_bykey(struct jesy_context *ctx, struct jesy_element *key, enum jesy_type type, char *value);
 uint32_t jesy_update_value_bykeyname(struct jesy_context *ctx, struct jesy_element *object, char *key_name, enum jesy_type type, char *value);
 uint32_t jesy_update_value_byarray(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, char *value);

@@ -1112,7 +1112,7 @@ struct jesy_element* jesy_add_value_null(struct jesy_context *ctx, struct jesy_e
   return jesy_add_value(ctx, parent, JESY_NULL, "null");
 }
 
-uint32_t jesy_update_key(struct jesy_context *ctx, struct jesy_element *object, char *key, char *new)
+uint32_t jesy_update_key_bykeyname(struct jesy_context *ctx, struct jesy_element *object, char *key, char *new)
 {
   uint32_t result = JESY_ELEMENT_NOT_FOUND;
   struct jesy_element *key_element = jesy_get_key(ctx, object, key);

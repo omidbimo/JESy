@@ -18,10 +18,10 @@
 /* Comment or undef to disable searching for duplicate keys and overwriting
    their values if you're sure that there will be no duplicate keys in the
    source JSON.
-   Disabling JESY_OVERWRITE_DUPLICATE_KEYS, will considerably improve the
+   Disabling JESY_ALLOW_DUPLICATE_KEYS, will considerably improve the
    parsing performance.
    */
-#define JESY_OVERWRITE_DUPLICATE_KEYS
+#define JESY_ALLOW_DUPLICATE_KEYS
 
 //#define JESY_USE_32BIT_NODE_DESCRIPTOR
 
@@ -181,7 +181,7 @@ uint32_t jesy_render(struct jesy_context *ctx, char *dst, uint32_t length);
  * return the required buffer size to render the JSON into string. If zero,
           there might be failures in the tree. Check ctx->status.
  */
-uint32_t jesy_evaluate(struct jesy_context *ctx);
+size_t jesy_evaluate(struct jesy_context *ctx);
 
 /* Deletes an element, containing all of its sub-elements. */
 void jesy_delete_element(struct jesy_context *ctx, struct jesy_element *element);

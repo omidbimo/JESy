@@ -444,7 +444,7 @@ static bool jesy_accept(struct jesy_context *ctx,
     struct jesy_element *new_node = NULL;
 
     if (element_type == JESY_KEY) {
-#ifdef JESY_OVERWRITE_DUPLICATE_KEYS
+#ifndef JESY_ALLOW_DUPLICATE_KEYS
       /* No duplicate keys in the same object are allowed.
          Only the last key:value will be reported if the keys are duplicated. */
       struct jesy_element *node = jesy_find_duplicate_key(ctx, ctx->iter, &ctx->token);
@@ -714,9 +714,9 @@ enum jesy_state {
   JESY_STATE_GOT_KEY,
 };
 
-uint32_t jesy_evaluate(struct jesy_context *ctx)
+size_t jesy_evaluate(struct jesy_context *ctx)
 {
-  uint32_t json_len = 0;
+  size_t json_len = 0;
   enum jesy_state state = JESY_STATE_WANT_OBJECT;
   ctx->status = JESY_NO_ERR;
 
@@ -783,7 +783,7 @@ uint32_t jesy_evaluate(struct jesy_context *ctx)
 
       case JESY_STATE_WANT_ARRAY_VALUE:
         if (ctx->iter->type == JESY_STRING) {
-            json_len += (ctx->iter->length + sizeof(char) * 2);/* +2 for "" */
+            json_len += (size_t)ctx->iter->length + (sizeof("\"\"") - 1);
         }
         else if ((ctx->iter->type == JESY_NUMBER)  ||
                  (ctx->iter->type == JESY_TRUE)    ||
@@ -1041,7 +1041,7 @@ struct jesy_element* jesy_get_value_byarray(struct jesy_context *ctx, struct jes
     if (index >= 0) {
       iter = HAS_CHILD(array) ? &ctx->pool[array->first_child] : NULL;
       for (; iter && index > 0; index--) {
-        iter = iter = HAS_SIBLING(iter) ? &ctx->pool[iter->sibling] : NULL;
+        iter = HAS_SIBLING(iter) ? &ctx->pool[iter->sibling] : NULL;
       }
     }
   }

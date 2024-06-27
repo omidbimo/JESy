@@ -983,20 +983,40 @@ struct jesy_element* jesy_get_root(struct jesy_context *ctx)
 }
 
 
-struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element *object, char *key_name)
+struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element *object, char *keys)
 {
   struct jesy_element *key_element = NULL;
   struct jesy_element *iter = NULL;
-  uint32_t key_len = (uint16_t)strnlen(key_name, 0xFFFF);
+  uint32_t key_len;
+  char *dot;
 
-  if (ctx && object && key_name && jesy_validate_element(ctx, object)) {
+  if (ctx && object && keys && jesy_validate_element(ctx, object)) {
     if (object->type != JESY_OBJECT) {
       return NULL;
     }
 
+    while (dot = strchr(keys, '.')) {
+      key_len = dot - keys;
+      iter = GET_CHILD(ctx, object);
+      while (iter) {
+        if ((iter->length == key_len) && (0 == memcmp(iter->value, keys, key_len))) {
+          if (iter->type == JESY_KEY) {
+            object = GET_CHILD(ctx, iter);
+            if (object->type != JESY_OBJECT) {
+              return NULL;
+            }
+            keys = keys + key_len + sizeof(*dot);
+          }
+          break;
+        }
+        iter = GET_SIBLING(ctx, iter);
+      }
+    }
+
+    key_len = strlen(keys);
     iter = GET_CHILD(ctx, object);
     while (iter) {
-      if ((iter->length == key_len) && (0 == strncmp(iter->value, key_name, key_len))) {
+      if ((iter->length == key_len) && (0 == memcmp(iter->value, keys, key_len))) {
         if (iter->type == JESY_KEY) {
           key_element = iter;
         }
@@ -1008,29 +1028,17 @@ struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element 
   return key_element;
 }
 
-struct jesy_element* jesy_get_value_bykey(struct jesy_context *ctx, struct jesy_element *key)
+struct jesy_element* jesy_get_key_value(struct jesy_context *ctx, struct jesy_element *object, char *keys)
 {
   struct jesy_element *value_element = NULL;
-
-  if (ctx && key && jesy_validate_element(ctx, key)) {
-    if (key->type == JESY_KEY) {
-      value_element = GET_CHILD(ctx, key);
-    }
-  }
-  return value_element;
-}
-
-struct jesy_element* jesy_get_value_bykeyname(struct jesy_context *ctx, struct jesy_element *object, char *key_name)
-{
-  struct jesy_element *value_element = NULL;
-  struct jesy_element *key = jesy_get_key(ctx, object, key_name);
+  struct jesy_element *key = jesy_get_key(ctx, object, keys);
   if (key) {
     value_element = GET_CHILD(ctx, key);
   }
   return value_element;
 }
 
-struct jesy_element* jesy_get_value_byarray(struct jesy_context *ctx, struct jesy_element *array, int16_t index)
+struct jesy_element* jesy_get_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index)
 {
   struct jesy_element *iter = NULL;
   if (ctx && array && jesy_validate_element(ctx, array)) {
@@ -1112,44 +1120,28 @@ struct jesy_element* jesy_add_value_null(struct jesy_context *ctx, struct jesy_e
   return jesy_add_value(ctx, parent, JESY_NULL, "null");
 }
 
-uint32_t jesy_update_key_bykeyname(struct jesy_context *ctx, struct jesy_element *object, char *key, char *new)
-{
-  uint32_t result = JESY_ELEMENT_NOT_FOUND;
-  struct jesy_element *key_element = jesy_get_key(ctx, object, key);
-
-  if (key_element) {
-    key_element->length = (uint16_t)strnlen(new, 0xFFFF);
-    key_element->value = new;
-    result = JESY_NO_ERR;
-  }
-  return result;
-}
-
-uint32_t jesy_update_value_bykey(struct jesy_context *ctx, struct jesy_element *key, enum jesy_type type, char *value)
+uint32_t jesy_update_key(struct jesy_context *ctx, struct jesy_element *key, char *new)
 {
   uint32_t result = JESY_INVALID_PARAMETER;
 
   if (ctx && key && jesy_validate_element(ctx, key)) {
-    if (key->type != JESY_KEY) {
-      return result;
-    }
-
-    jesy_delete_element(ctx, GET_CHILD(ctx, key));
-    if (jesy_add_value(ctx, key, type, value)) {
-      result = JESY_NO_ERR;
-    }
-    else {
-      result = ctx->status;
+    if (key->type == JESY_KEY) {
+      size_t key_len = strlen(new);
+      if (key_len < 65535) {
+        key->length = key_len;
+        key->value = new;
+        result = JESY_NO_ERR;
+      }
     }
   }
   return result;
 }
 
-uint32_t jesy_update_value_bykeyname(struct jesy_context *ctx, struct jesy_element *object, char *key_name, enum jesy_type type, char *value)
+uint32_t jesy_update_key_value(struct jesy_context *ctx, struct jesy_element *object, char *keys, enum jesy_type type, char *value)
 {
   uint32_t result = JESY_INVALID_PARAMETER;
 
-  struct jesy_element *key = jesy_get_key(ctx, object, key_name);
+  struct jesy_element *key = jesy_get_key(ctx, object, keys);
   if (key) {
     jesy_delete_element(ctx, GET_CHILD(ctx, key));
     if (jesy_add_value(ctx, key, type, value)) {
@@ -1162,10 +1154,10 @@ uint32_t jesy_update_value_bykeyname(struct jesy_context *ctx, struct jesy_eleme
   return result;
 }
 
-uint32_t jesy_update_value_byarray(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, char *value)
+uint32_t jesy_update_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, char *value)
 {
   uint32_t result = JESY_ELEMENT_NOT_FOUND;
-  struct jesy_element *value_element = jesy_get_value_byarray(ctx, array, index);
+  struct jesy_element *value_element = jesy_get_array_value(ctx, array, index);
   if (value_element) {
     while (HAS_CHILD(value_element)) {
       jesy_delete_element(ctx, GET_CHILD(ctx, value_element));

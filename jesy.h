@@ -15,12 +15,12 @@
   #define JESY_LOG_MSG(...)
 #endif
 
-/* Comment or undef to disable searching for duplicate keys and overwriting
-   their values if you're sure that there will be no duplicate keys in the
-   source JSON.
-   Disabling JESY_ALLOW_DUPLICATE_KEYS, will considerably improve the
-   parsing performance.
-   */
+/* Comment or undef to enable searching for duplicate keys and overwriting
+ * their values.
+ * Leaving JESY_ALLOW_DUPLICATE_KEYS enabled, has a positive impact on the
+ * parsing performance when processing large documents. If key duplication is
+ * not a big deal in your implementation, then relax the parser.
+ */
 #define JESY_ALLOW_DUPLICATE_KEYS
 
 //#define JESY_USE_32BIT_NODE_DESCRIPTOR
@@ -201,23 +201,17 @@ enum jesy_type jesy_get_parent_type(struct jesy_context *ctx, struct jesy_elemen
 /* Returns a Key element inside the given object.
  * param [in] ctx
  * param [in] object is a JSON element of type JESY_OBJECT
- * param [in] key_name is a NUL-terminated key name
+ * param [in] keys is a NUL-terminated string containing several key names separated by a dot "."
  *
- * return an element of type JESY_KEY or NULL if the key is not found in the object.
- *
- * note: the function doesn't perform a whole tree search to find the requested key.
- *       Only the keys directly under the given object will be checked.
+ * return an element of type JESY_KEY or NULL if the key is not found.
  */
-struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element *object, char *key_name);
-
-/* Returns value element of a given key element. NULL if element has no value yet. */
-struct jesy_element* jesy_get_value_bykey(struct jesy_context *ctx, struct jesy_element *key);
+struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element *object, char *keys);
 
 /* Returns value element of a given key name. NULL if element has no value yet.  */
-struct jesy_element* jesy_get_value_bykeyname(struct jesy_context *ctx, struct jesy_element *object, char *key_name);
+struct jesy_element* jesy_get_key_value(struct jesy_context *ctx, struct jesy_element *object, char *keys);
 
 /* Returns value element of a given array element. NULL if element has no value yet. */
-struct jesy_element* jesy_get_value_byarray(struct jesy_context *ctx, struct jesy_element *array, int16_t index);
+struct jesy_element* jesy_get_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index);
 
 /* Add an object to a given parent element. Possible acceptable parent elements are JESY_KEY and JESY_ARRAY.
  * return a status code of type enum jesy_status */
@@ -230,17 +224,18 @@ struct jesy_element* jesy_add_value_number(struct jesy_context *ctx, struct jesy
 struct jesy_element* jesy_add_value_true(struct jesy_context *ctx, struct jesy_element *parent);
 struct jesy_element* jesy_add_value_false(struct jesy_context *ctx, struct jesy_element *parent);
 struct jesy_element* jesy_add_value_null(struct jesy_context *ctx, struct jesy_element *parent);
-/* Update the name of a key element giving its parent object.
+/* Update a key element giving its parent object.
  * note: The new key name will not be copied and must be non-retentive for the life time of jesy_context.
  * return a status code of type enum jesy_status */
-uint32_t jesy_update_key_bykey(struct jesy_context *ctx, struct jesy_element *object, struct jesy_element *key, char *new);
-/* Update the name of a key element giving its current name and its parent object.
- * note: The new key name will not be copied and must be non-retentive for the life time of jesy_context.
+uint32_t jesy_update_key(struct jesy_context *ctx, struct jesy_element *key, char *new);
+/* Update key value giving its name or name a series of keys separated with a dot
+ * note: The new value will not be copied and must be non-retentive for the life time of jesy_context.
  * return a status code of type enum jesy_status */
-uint32_t jesy_update_key_bykeyname(struct jesy_context *ctx, struct jesy_element *object, char *key, char *new);
-uint32_t jesy_update_value_bykey(struct jesy_context *ctx, struct jesy_element *key, enum jesy_type type, char *value);
-uint32_t jesy_update_value_bykeyname(struct jesy_context *ctx, struct jesy_element *object, char *key_name, enum jesy_type type, char *value);
-uint32_t jesy_update_value_byarray(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, char *value);
+uint32_t jesy_update_key_value(struct jesy_context *ctx, struct jesy_element *object, char *keys, enum jesy_type type, char *value);
+/* Update array value giving its array element and an index.
+ * note: The new value will not be copied and must be non-retentive for the life time of jesy_context.
+ * return a status code of type enum jesy_status */
+uint32_t jesy_update_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, char *value);
 
 #define JESY_FOR_EACH(ctx_, elem_, type_) for(elem_ = (elem_->type == type_) ? jesy_get_child(ctx_, elem_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))
 #define JESY_ARRAY_FOR_EACH(ctx_, elem_) for(elem_ = (elem_->type == JESY_ARRAY) ? jesy_get_child(ctx_, elem_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))

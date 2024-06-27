@@ -4,7 +4,6 @@ JSON for Embedded Systems is a lightweight [JSON ]([JSON](https://www.json.org/j
 
 JESy provides an API to parse JSON documents into a tree of JSON elements, manipulate the elements and then render the elements into a string.
 
-
 ## Key features
 
 - No dynamic memory allocation. All objects will be stotred on a single working buffer.
@@ -13,23 +12,23 @@ JESy provides an API to parse JSON documents into a tree of JSON elements, manip
 
 - Can process multiple JSON documents at the same time. The parser context is unique for each document and is mamintained on the working buffer.
 
--  It's fast since it doesn't copy any data from the source document. 
+- It's fast since it doesn't copy any data from the source document. 
 
 - No external dependencies
 
 - Configurable to support/overwrite duplicate keys
-
-
 
 ## Usage
 
 ### Parse a JSON string
 
 ```c
+#include <stdio.h>
 #include "jesy.h"
 
-const char input_data[] = "{ \"key\": \"value\" }";
+const char input_data[] = "{ \"key1\": { \"key2\": \"some_value\" }}";
 static uint8_t buffer[0x1000];
+struct jesy_element val;
 jesy_status err;
 
 struct jesy_context *doc = jesy_init_context(buffer, sizeof(buffer));
@@ -43,9 +42,7 @@ if (0 != (err = jesy_parse(doc, input_data , sizeof(input_data)))) {
     return;
 }
 
-TBC
+val= jesy_get_key_value(doc, jesy_get_root(doc), "key1.key2");
 
-
-
-
+printf("key1.key2: %.*s", val.length, val.value);
 ```

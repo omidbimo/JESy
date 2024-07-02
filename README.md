@@ -23,12 +23,10 @@ JESy provides an API to parse JSON documents into a tree of JSON elements, manip
 ### Parse a JSON string
 
 ```c
-#include <stdio.h>
 #include "jesy.h"
 
 const char input_data[] = "{ \"key1\": { \"key2\": \"some_value\" }}";
 static uint8_t buffer[0x1000];
-struct jesy_element val;
 jesy_status err;
 
 struct jesy_context *doc = jesy_init_context(buffer, sizeof(buffer));
@@ -42,7 +40,5 @@ if (0 != (err = jesy_parse(doc, input_data , sizeof(input_data)))) {
     return;
 }
 
-val= jesy_get_key_value(doc, jesy_get_root(doc), "key1.key2");
 
-printf("key1.key2: %.*s", val.length, val.value);
 ```

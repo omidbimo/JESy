@@ -113,7 +113,7 @@ struct jesy_context {
   /* Number of nodes in the current JSON */
   uint32_t node_count;
   /* JSON data to be parsed */
-  char     *json_data;
+  const char *json_data;
   /* Length of JSON data in bytes. */
   uint32_t  json_size;
   /* Offset of the next symbol in the input JSON data Tokenizer is going to consume. */
@@ -125,10 +125,10 @@ struct jesy_context {
    struct jesy_element *pool;
   /* Pool size in bytes. It is limited to 32-bit value which is more than what
    * most of embedded systems can provide. */
-  uint32_t  pool_size;
+  uint32_t pool_size;
   /* Number of nodes that can be allocated on the given buffer. The value will
      be limited to 65535 in case of 16-bit node descriptors. */
-  uint32_t  capacity;
+  uint32_t capacity;
   /* Index of the last allocated node */
   jesy_node_descriptor  index;
   /* Holds the last token delivered by tokenizer. */
@@ -160,7 +160,7 @@ struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size);
  *
  * note: the return value is also available in ctx->status
  */
-uint32_t jesy_parse(struct jesy_context* ctx, char *json_data, uint32_t json_length);
+uint32_t jesy_parse(struct jesy_context* ctx, const char *json_data, uint32_t json_length);
 
 /* Render a tree of JSON elements into the destination buffer as a non-NUL terminated string.
  * param [in] ctx the Jesy context containing a JSON tree.
@@ -206,38 +206,44 @@ enum jesy_type jesy_get_parent_type(struct jesy_context *ctx, struct jesy_elemen
  * return an element of type JESY_KEY or NULL if the key is not found.
  */
 struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element *object, char *keys);
-
+/* To get access to an object element giving keys value and the parent object.
+ * return key's value if it's of type JESY_OBJECT or null */
+struct jesy_element* jesy_get_object(struct jesy_context *ctx, struct jesy_element *object, char *keys);
+/* To get access to an array element giving keys value and the parent object.
+ * return key value if it's of type JESY_ARRAY or null */
+struct jesy_element* jesy_get_array(struct jesy_context *ctx, struct jesy_element *object, char *keys);
 /* Returns value element of a given key name. NULL if element has no value yet.  */
 struct jesy_element* jesy_get_key_value(struct jesy_context *ctx, struct jesy_element *object, char *keys);
-
 /* Returns value element of a given array element. NULL if element has no value yet. */
 struct jesy_element* jesy_get_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index);
-
-/* Add an object to a given parent element. Possible acceptable parent elements are JESY_KEY and JESY_ARRAY.
- * return a status code of type enum jesy_status */
-struct jesy_element* jesy_add_object(struct jesy_context *ctx, struct jesy_element *parent);
-struct jesy_element* jesy_add_array(struct jesy_context *ctx, struct jesy_element *parent);
-struct jesy_element* jesy_add_key(struct jesy_context *ctx, struct jesy_element *parent, char *key);
-struct jesy_element* jesy_add_value(struct jesy_context *ctx, struct jesy_element *parent, enum jesy_type type, char *value);
-struct jesy_element* jesy_add_value_string(struct jesy_context *ctx, struct jesy_element *parent, char *value);
-struct jesy_element* jesy_add_value_number(struct jesy_context *ctx, struct jesy_element *parent, char *value);
-struct jesy_element* jesy_add_value_true(struct jesy_context *ctx, struct jesy_element *parent);
-struct jesy_element* jesy_add_value_false(struct jesy_context *ctx, struct jesy_element *parent);
-struct jesy_element* jesy_add_value_null(struct jesy_context *ctx, struct jesy_element *parent);
+/* Add an element to another element. */
+struct jesy_element* jesy_add_element(struct jesy_context *ctx, struct jesy_element *parent, enum jesy_type type, char *value);
+/* Add a key to an object */
+struct jesy_element* jesy_add_key(struct jesy_context *ctx, struct jesy_element *object, char *keyword);
 /* Update a key element giving its parent object.
  * note: The new key name will not be copied and must be non-retentive for the life time of jesy_context.
  * return a status code of type enum jesy_status */
-uint32_t jesy_update_key(struct jesy_context *ctx, struct jesy_element *key, char *new);
+uint32_t jesy_update_key(struct jesy_context *ctx, struct jesy_element *key, char *keyword);
 /* Update key value giving its name or name a series of keys separated with a dot
  * note: The new value will not be copied and must be non-retentive for the life time of jesy_context.
  * return a status code of type enum jesy_status */
 uint32_t jesy_update_key_value(struct jesy_context *ctx, struct jesy_element *object, char *keys, enum jesy_type type, char *value);
+/* Update the key value to a JESY_OBJECT element */
+uint32_t jesy_update_key_value_object(struct jesy_context *ctx, struct jesy_element *object, char *keys);
+/* Update the key value to a JESY_ARRAY element */
+uint32_t jesy_update_key_value_array(struct jesy_context *ctx, struct jesy_element *object, char *keys);
+/* Update the key value to a JESY_TRUE element */
+uint32_t jesy_update_key_value_true(struct jesy_context *ctx, struct jesy_element *object, char *keys);
+/* Update the key value to a JESY_FALSE element */
+uint32_t jesy_update_key_value_false(struct jesy_context *ctx, struct jesy_element *object, char *keys);
+/* Update the key value to a JESY_NULL element */
+uint32_t jesy_update_key_value_null(struct jesy_context *ctx, struct jesy_element *object, char *keys);
 /* Update array value giving its array element and an index.
  * note: The new value will not be copied and must be non-retentive for the life time of jesy_context.
  * return a status code of type enum jesy_status */
 uint32_t jesy_update_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, char *value);
 
 #define JESY_FOR_EACH(ctx_, elem_, type_) for(elem_ = (elem_->type == type_) ? jesy_get_child(ctx_, elem_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))
-#define JESY_ARRAY_FOR_EACH(ctx_, elem_) for(elem_ = (elem_->type == JESY_ARRAY) ? jesy_get_child(ctx_, elem_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))
+#define JESY_ARRAY_FOR_EACH(ctx_, array_, elem_) for(elem_ = (array_->type == JESY_ARRAY) ? jesy_get_child(ctx_, array_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))
 
 #endif

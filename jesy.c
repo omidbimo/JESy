@@ -72,7 +72,7 @@ static void jesy_free(struct jesy_context *ctx, struct jesy_element *element)
   assert(element >= ctx->pool);
   assert(element < (ctx->pool + ctx->capacity));
   assert(ctx->node_count > 0);
-  printf("\n free: type: %s - %.*s", jesy_node_type_str[element->type], element->length, element->value);
+
   if (ctx->node_count > 0) {
     free_node->next = NULL;
     ctx->node_count--;

@@ -72,7 +72,7 @@ static void jesy_free(struct jesy_context *ctx, struct jesy_element *element)
   assert(element >= ctx->pool);
   assert(element < (ctx->pool + ctx->capacity));
   assert(ctx->node_count > 0);
-
+  printf("\n free: type: %s - %.*s", jesy_node_type_str[element->type], element->length, element->value);
   if (ctx->node_count > 0) {
     free_node->next = NULL;
     ctx->node_count--;
@@ -199,14 +199,17 @@ void jesy_delete_element(struct jesy_context *ctx, struct jesy_element *element)
 {
   struct jesy_element *iter = element;
 
-  if (!jesy_validate_element(ctx, element)) {
+  if (!element || !jesy_validate_element(ctx, element)) {
     return;
   }
 
   while (true) {
-
     while (HAS_CHILD(iter)) {
       iter = &ctx->pool[iter->first_child];
+    }
+
+    if (iter == element) {
+      break;
     }
 
     if (HAS_PARENT(iter)) {
@@ -214,12 +217,28 @@ void jesy_delete_element(struct jesy_context *ctx, struct jesy_element *element)
     }
 
     jesy_free(ctx, iter);
-    if (iter == element) {
-      break;
-    }
-
     iter = &ctx->pool[iter->parent];
   }
+  /* All sub-elements are deleted. To delete the element parent and sibling links need to be maintained. */
+  iter = GET_PARENT(ctx, element);
+  if (iter) {
+    if (&ctx->pool[iter->first_child] == element) {
+      iter->first_child = element->sibling;
+    }
+    else {
+      /* Element is not the first child of it's parent. Need to iterate all children to reach element and maintain the linkage.*/
+      iter = &ctx->pool[iter->first_child];
+      while(iter) {
+        if (&ctx->pool[iter->sibling] == element) {
+          iter->sibling = element->sibling;
+          break;
+        }
+        iter = &ctx->pool[iter->sibling];
+      }
+    }
+  }
+
+  jesy_free(ctx, element);
 }
 
 const struct {
@@ -1024,6 +1043,7 @@ struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element 
       iter = GET_SIBLING(ctx, iter);
     }
   }
+
   return key_element;
 }
 
@@ -1118,6 +1138,11 @@ struct jesy_element* jesy_add_element(struct jesy_context *ctx, struct jesy_elem
   return jesy_append_element(ctx, parent, type, strlen(value), value);
 }
 
+struct jesy_element* jesy_add_object(struct jesy_context *ctx, struct jesy_element *object)
+{
+  return jesy_add_element(ctx, object, JESY_OBJECT, "");
+}
+
 struct jesy_element* jesy_add_key(struct jesy_context *ctx, struct jesy_element *object, const char *keyword)
 {
   return jesy_add_element(ctx, object, JESY_KEY, keyword);
@@ -1182,9 +1207,9 @@ uint32_t jesy_update_key_value_null(struct jesy_context *ctx, struct jesy_elemen
   return jesy_update_key_value(ctx, object, keys, JESY_NULL, "");
 }
 
-uint32_t jesy_update_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, const char *value)
+struct jesy_element* jesy_update_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, const char *value)
 {
-  uint32_t result = JESY_ELEMENT_NOT_FOUND;
+
   struct jesy_element *value_element = jesy_get_array_value(ctx, array, index);
   if (value_element) {
     while (HAS_CHILD(value_element)) {
@@ -1193,7 +1218,10 @@ uint32_t jesy_update_array_value(struct jesy_context *ctx, struct jesy_element *
     value_element->type = type;
     value_element->length = (uint16_t)strnlen(value, 0xFFFF);
     value_element->value = value;
-    result = JESY_NO_ERR;
   }
-  return result;
+  else {
+    value_element = jesy_add_element(ctx, array, type, value);
+  }
+
+  return value_element;
 }

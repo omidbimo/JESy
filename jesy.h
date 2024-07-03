@@ -220,6 +220,8 @@ struct jesy_element* jesy_get_key_value(struct jesy_context *ctx, struct jesy_el
 struct jesy_element* jesy_get_array_value(struct jesy_context *ctx, struct jesy_element *array, int32_t index);
 /* Add an element to another element. */
 struct jesy_element* jesy_add_element(struct jesy_context *ctx, struct jesy_element *parent, enum jesy_type type, const char *value);
+/* Add an object to an element */
+struct jesy_element* jesy_add_object(struct jesy_context *ctx, struct jesy_element *parent);
 /* Add a key to an object */
 struct jesy_element* jesy_add_key(struct jesy_context *ctx, struct jesy_element *object, const char *keyword);
 /* Update a key element giving its parent object.
@@ -243,7 +245,7 @@ uint32_t jesy_update_key_value_null(struct jesy_context *ctx, struct jesy_elemen
 /* Update array value giving its array element and an index.
  * note: The new value will not be copied and must be non-retentive for the life time of jesy_context.
  * return a status code of type enum jesy_status */
-uint32_t jesy_update_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, const char *value);
+struct jesy_element* jesy_update_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, const char *value);
 
 #define JESY_FOR_EACH(ctx_, elem_, type_) for(elem_ = (elem_->type == type_) ? jesy_get_child(ctx_, elem_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))
 #define JESY_ARRAY_FOR_EACH(ctx_, array_, elem_) for(elem_ = (array_->type == JESY_ARRAY) ? jesy_get_child(ctx_, array_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))

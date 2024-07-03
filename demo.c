@@ -6,7 +6,7 @@
 
 #define POOL_SIZE 4096
 static uint8_t mem_pool[POOL_SIZE];
-static char output[2048];
+static char outbuf[2048];
 
 
 int main(void)
@@ -41,7 +41,7 @@ int main(void)
                   "],"
                   "\"?\": ["
                       "{\"id\": \"Help\"},"
-                      "{\"id\": \"About\", \"label\": \"About Adobe CVG Viewer...\"}"
+                      "{\"id\": \"About\", \"label\": \"About JESy for Embedded Systems...\"}"
                   "]"
               "}}";
 
@@ -110,6 +110,56 @@ int main(void)
     printf("\n    menu.edit.id[%d]: \"%.*s\"", index, value->length, value->value);
   }
 
+  /* Changing a key's value */
+  items = jesy_get_key_value(jdoc, jesy_get_root(jdoc), "menu.playback");
+
+  value = jesy_get_key_value(jdoc, jesy_get_array_value(jdoc, items, -1), "id");
+  if (value) printf("\n    Before change:\n        menu.playback.id[-1]: \"%.*s\"", value->length, value->value);
+
+  /* Getting last element of playback array and then getting the key value element.
+     jesy_get_array_value delivers the object containing the id:playback speed*/
+  if (0 == jesy_update_key_value(jdoc, jesy_get_array_value(jdoc, items, -1), "id", JESY_STRING, "PlaybackSpeed")) {
+    value = jesy_get_key_value(jdoc, jesy_get_array_value(jdoc, items, -1), "id");
+    if (value) printf("\n    After change:\n        menu.playback.id[-1]: \"%.*s\"", value->length, value->value);
+  }
+
+  /* Adding a new key:value pair */
+  items = jesy_get_key_value(jdoc, jesy_get_root(jdoc), "menu.file");
+  object = jesy_add_object(jdoc, items);
+  if (object) {
+    key = jesy_add_key(jdoc, object, "id");
+    if (key) {
+      jesy_update_key_value(jdoc, object, "id", JESY_STRING, "Save");
+    }
+  }
+
+  value = jesy_get_key_value(jdoc, jesy_get_array_value(jdoc, items, -1), "id");
+  if (value) printf("\n    menu.file.id[-1]: \"%.*s\"", value->length, value->value);
+
+  /* Adding a new key:value pair alternative way. */
+  items = jesy_get_key_value(jdoc, jesy_get_root(jdoc), "menu.file");
+  /* Updating an array value which doesn't exist, will add a new value to the array */
+  object = jesy_update_array_value(jdoc, items, jesy_get_array_size(jdoc, items), JESY_OBJECT, "");
+  if (object) {
+    key = jesy_add_key(jdoc, object, "id");
+    if (key) {
+      jesy_update_key_value(jdoc, object, "id", JESY_STRING, "Close");
+    }
+  }
+  value = jesy_get_key_value(jdoc, jesy_get_array_value(jdoc, items, -1), "id");
+  if (value) printf("\n    menu.file.id[-1]: \"%.*s\"", value->length, value->value);
+
+  /* Deleting an element and all it's sub-elements...
+     We're going to delete CopyAgain from the edit menu. */
+  items = jesy_get_key_value(jdoc, jesy_get_root(jdoc), "menu.edit");
+  object = jesy_get_array_value(jdoc, items, 3);
+  value = jesy_get_key_value(jdoc, object, "id");
+  if (value) printf("\n    menu.edit.id[3]: \"%.*s\"", value->length, value->value);
+  jesy_delete_element(jdoc, object);
+
+  /* Rendering the JSON elements into a string (not NUL-terminated) */
+  out_size = jesy_render(jdoc, outbuf, sizeof(outbuf));
+  printf("\n%.*s", out_size, outbuf);
 
   return 0;
 }

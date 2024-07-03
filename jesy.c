@@ -995,6 +995,7 @@ struct jesy_element* jesy_get_key(struct jesy_context *ctx, struct jesy_element 
     if (object->type != JESY_OBJECT) {
       return NULL;
     }
+
     while (dot = strchr(keys, '.')) {
       key_len = dot - keys;
       iter = GET_CHILD(ctx, object);
@@ -1055,12 +1056,31 @@ struct jesy_element* jesy_get_array(struct jesy_context *ctx, struct jesy_elemen
   return NULL;
 }
 
+size_t jesy_get_array_size(struct jesy_context *ctx, struct jesy_element *array)
+{
+  size_t count = 0;
+  struct jesy_element *iter;
+
+  if (ctx && array && jesy_validate_element(ctx, array)) {
+    iter = GET_CHILD(ctx, array);
+    for (count = 0; iter != NULL; count++) {
+      iter = GET_SIBLING(ctx, iter);
+    }
+  }
+  return count;
+}
+
 struct jesy_element* jesy_get_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index)
 {
   struct jesy_element *iter = NULL;
-  if (ctx && array && jesy_validate_element(ctx, array)) {
-    if (array->type != JESY_ARRAY) {
-      return NULL;
+
+  if (ctx && array && jesy_validate_element(ctx, array) && (array->type == JESY_ARRAY)) {
+    size_t array_count = jesy_get_array_size(ctx, array);
+
+    if (index < 0) { /* converting negative index to an index from the end of array. */
+      if (-index <= array_count) {
+        index = array_count + index;
+      }
     }
 
     if (index >= 0) {

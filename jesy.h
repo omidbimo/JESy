@@ -212,6 +212,8 @@ struct jesy_element* jesy_get_object(struct jesy_context *ctx, struct jesy_eleme
 /* To get access to an array element giving keys value and the parent object.
  * return key value if it's of type JESY_ARRAY or null */
 struct jesy_element* jesy_get_array(struct jesy_context *ctx, struct jesy_element *object, char *keys);
+/* Get the number elements within an JESY_ARRAY element */
+size_t jesy_get_array_size(struct jesy_context *ctx, struct jesy_element *array);
 /* Returns value element of a given key name. NULL if element has no value yet.  */
 struct jesy_element* jesy_get_key_value(struct jesy_context *ctx, struct jesy_element *object, char *keys);
 /* Returns value element of a given array element. NULL if element has no value yet. */

@@ -634,6 +634,14 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
         break;
       /* ARRAY: COICE { VALUE, OPENING_BRACE, CLOSING_BRACE, OPENING_BRACKET } */
       case JESY_ARRAY:
+        /* Array already has children elements. A comma is required to add new values */
+        if (HAS_CHILD(ctx->iter)) {
+          if (!jesy_accept(ctx, JESY_TOKEN_COMMA, JESY_NONE)) {
+            jesy_expect(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE);
+            break;
+          }
+        }
+
         if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_STRING)  ||
             jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_NUMBER)  ||
             jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_TRUE)      ||
@@ -641,7 +649,7 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
             jesy_accept(ctx, JESY_TOKEN_NULL, JESY_NULL)      ||
             jesy_accept(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT) ||
             jesy_accept(ctx, JESY_TOKEN_OPENING_BRACE, JESY_ARRAY)) {
-          jesy_accept(ctx, JESY_TOKEN_COMMA, JESY_NONE);
+          //jesy_accept(ctx, JESY_TOKEN_COMMA, JESY_NONE);
           break;
         }
 

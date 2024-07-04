@@ -13,7 +13,7 @@ int main(void)
 {
   const char json_data[] =
               "{\"menu\": {"
-                  "\"header\": \"SVG Viewer\","
+                  "\"header\": \"SVG Viewer\",\n"
                   "\"file\": ["
                       "{\"id\": \"Open\"},"
                       "{\"id\": \"OpenNew\", \"label\": \"Open New\"},"
@@ -21,7 +21,7 @@ int main(void)
                   "],"
                   "\"view\": ["
                       "{\"id\": \"ZoomIn\", \"label\": \"Zoom In\"},"
-                      "{\"id\": \"ZoomOut\", \"label\": \"Zoom Out\"},"
+                      "{\"id\": \"ZoomOut\", \"label\": \"Zoom Out\"}"
                       "{\"id\": \"OriginalView\", \"label\": \"Original View\"}"
                   "],"
                   "\"playback\": ["
@@ -50,6 +50,7 @@ int main(void)
   int index;
   struct jesy_element *element, *key, *object, *items, *value;
   struct jesy_element *root;
+  char err_info[255];
 
   struct jesy_context *jdoc = jesy_init_context(mem_pool, sizeof(mem_pool));
   if (!jdoc) {
@@ -63,6 +64,8 @@ int main(void)
   {
     /* Add your error handling here. */
     printf("\n    Parsing Error: %d - %s", err, jesy_status_str[err]);
+    /* Only available in a debug build */
+    printf("\n%s", JESY_STRINGIFY_ERROR(jdoc, err_info, sizeof(err_info)));
     return -1;
   }
 
@@ -136,7 +139,8 @@ int main(void)
   value = jesy_get_key_value(jdoc, jesy_get_array_value(jdoc, items, -1), "id");
   if (value) printf("\n    menu.file.id[-1]: \"%.*s\"", value->length, value->value);
 
-  /* Adding a new key:value pair alternative way. */
+  /* Adding a new key:value pair alternative way.
+     Let's add a new object+Key:value to the menu file */
   items = jesy_get_key_value(jdoc, jesy_get_root(jdoc), "menu.file");
   /* Updating an array value which doesn't exist, will add a new value to the array */
   object = jesy_update_array_value(jdoc, items, jesy_get_array_size(jdoc, items), JESY_OBJECT, "");

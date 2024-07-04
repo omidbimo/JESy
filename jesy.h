@@ -9,10 +9,12 @@
   #define JESY_LOG_TOKEN jesy_log_token
   #define JESY_LOG_NODE  jesy_log_node
   #define JESY_LOG_MSG   jesy_log_msg
+  #define JESY_STRINGIFY_ERROR  jesy_get_status_info
 #else
   #define JESY_LOG_TOKEN(...)
   #define JESY_LOG_NODE(...)
   #define JESY_LOG_MSG(...)
+  #define JESY_STRINGIFY_ERROR(...) ""
 #endif
 
 /* Comment or undef to enable searching for duplicate keys and overwriting
@@ -109,7 +111,10 @@ struct jesy_token {
 };
 
 struct jesy_context {
+
   uint32_t status;
+  /* Extended status code. In some cases provides more detailed information about the status. */
+  uint32_t ext_status;
   /* Number of nodes in the current JSON */
   uint32_t node_count;
   /* JSON data to be parsed */
@@ -118,6 +123,7 @@ struct jesy_context {
   uint32_t  json_size;
   /* Offset of the next symbol in the input JSON data Tokenizer is going to consume. */
   uint32_t  offset;
+  uint32_t  line_number;
   /* Part of the buffer given by the user at the time of the context initialization.
    * The buffer will be used to allocate the context structure at first. Then
    * the remaining will be used as a pool of nodes (max. 65535 nodes).
@@ -182,7 +188,6 @@ uint32_t jesy_render(struct jesy_context *ctx, char *dst, uint32_t length);
           there might be failures in the tree. Check ctx->status.
  */
 uint32_t jesy_evaluate(struct jesy_context *ctx);
-
 /* Deletes an element, containing all of its sub-elements. */
 void jesy_delete_element(struct jesy_context *ctx, struct jesy_element *element);
 
@@ -250,4 +255,8 @@ struct jesy_element* jesy_update_array_value(struct jesy_context *ctx, struct je
 #define JESY_FOR_EACH(ctx_, elem_, type_) for(elem_ = (elem_->type == type_) ? jesy_get_child(ctx_, elem_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))
 #define JESY_ARRAY_FOR_EACH(ctx_, array_, elem_) for(elem_ = (array_->type == JESY_ARRAY) ? jesy_get_child(ctx_, array_) : NULL; elem_ != NULL; elem_ = jesy_get_sibling(ctx_, elem_))
 
+
+#ifndef NDEBUG
+  char* jesy_get_status_info(struct jesy_context *ctx, char *buffer, uint32_t length);
+#endif
 #endif

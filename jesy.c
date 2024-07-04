@@ -20,6 +20,7 @@
   tok.length = size_;
 
 #define IS_SPACE(c) ((c==' ') || (c=='\t') || (c=='\r') || (c=='\n'))
+#define IS_NEW_LINE(c) ((c=='\r') || (c=='\n'))
 #define IS_DIGIT(c) ((c >= '0') && (c <= '9'))
 #define IS_ESCAPE(c) ((c=='\\') || (c=='\"') || (c=='\/') || (c=='\b') || \
                       (c=='\f') || (c=='\n') || (c=='\r') || (c=='\t') || (c == '\u'))
@@ -246,10 +247,10 @@ const struct {
   enum jesy_token_type token_type;
 } jesy_symbolic_token_mapping[] = {
   {'\0', JESY_TOKEN_EOF             },
-  {'{',  JESY_TOKEN_OPENING_BRACKET },
-  {'}',  JESY_TOKEN_CLOSING_BRACKET },
-  {'[',  JESY_TOKEN_OPENING_BRACE   },
-  {']',  JESY_TOKEN_CLOSING_BRACE   },
+  {'{',  JESY_TOKEN_CLOSING_BRACE   },
+  {'}',  JESY_TOKEN_CLOSING_BRACE   },
+  {'[',  JESY_TOKEN_OPENING_BRACKET },
+  {']',  JESY_TOKEN_CLOSING_BRACKET },
   {':',  JESY_TOKEN_COLON           },
   {',',  JESY_TOKEN_COMMA           },
   };
@@ -381,6 +382,9 @@ static struct jesy_token jesy_get_token(struct jesy_context *ctx)
 
       /* Skipping space symbols including: space, tab, carriage return */
       if (IS_SPACE(ch)) {
+        if (IS_NEW_LINE(ch)) {
+          ctx->line_number++;
+        }
         continue;
       }
 
@@ -498,7 +502,7 @@ static bool jesy_accept(struct jesy_context *ctx,
              if the value is a part of an array, go back parent array node.
              otherwise, go back to the parent object.
       */
-      if (token_type == JESY_TOKEN_CLOSING_BRACE) {
+      if (token_type == JESY_TOKEN_CLOSING_BRACKET) {
         /* [] (empty array) is a special case that needs no iteration in the
            direction the parent node. */
         if (ctx->iter->type != JESY_ARRAY) {
@@ -506,7 +510,7 @@ static bool jesy_accept(struct jesy_context *ctx,
         }
         ctx->iter = jesy_get_structure_parent_node(ctx, ctx->iter);
       }
-      else if (token_type == JESY_TOKEN_CLOSING_BRACKET) {
+      else if (token_type == JESY_TOKEN_CLOSING_BRACE) {
         /* {} (empty object)is a special case that needs no iteration in the
            direction the parent node. */
         if (ctx->iter->type != JESY_OBJECT) {
@@ -542,22 +546,55 @@ static bool jesy_accept(struct jesy_context *ctx,
 }
 
 static bool jesy_expect(struct jesy_context *ctx,
-                        enum jesy_token_type token_type,
+                        enum jesy_token_type expected_token_type,
                         enum jesy_type element_type)
 {
-  if (jesy_accept(ctx, token_type, element_type)) {
+  if (jesy_accept(ctx, expected_token_type, element_type)) {
     return true;
   }
   if (!ctx->status) {
     ctx->status = JESY_UNEXPECTED_TOKEN; /* Keep the first error */
+    ctx->ext_status = expected_token_type;
 #ifndef NDEBUG
   printf("\nJES.Parser error! Unexpected Token. %s \"%.*s\" expected a %s after %s",
       jesy_token_type_str[ctx->token.type], ctx->token.length,
-      &ctx->json_data[ctx->token.offset], jesy_token_type_str[token_type], jesy_node_type_str[ctx->iter->type]);
+      &ctx->json_data[ctx->token.offset], jesy_token_type_str[expected_token_type], jesy_node_type_str[ctx->iter->type]);
 #endif
   }
   return false;
 }
+
+#ifndef NDEBUG
+char* jesy_get_status_info(struct jesy_context *ctx, char *buffer, uint32_t length)
+{
+  if (!ctx || !buffer || length == 0) {
+    return "";
+  }
+
+  switch (ctx->status) {
+    case JESY_NO_ERR:
+      snprintf(buffer, length, "(%d)JESY_NO_ERR", ctx->status);
+      break;
+    case JESY_UNEXPECTED_TOKEN:
+      snprintf( buffer, length,
+                "(%d)JESY_UNEXPECTED_TOKEN: <%s> @[line:%d, pos:%d] ...%.20s>>%.*s<<... - expected <%s> after <%s> element",
+                ctx->status,
+                jesy_token_type_str[ctx->token.type],
+                ctx->line_number,
+                ctx->offset,
+                ctx->token.offset >= 20 ? &ctx->json_data[ctx->token.offset - 20] : &ctx->json_data[0],
+                ctx->token.length,
+                &ctx->json_data[ctx->token.offset],
+                jesy_token_type_str[ctx->ext_status],
+                jesy_node_type_str[ctx->iter->type] );
+      break;
+    default:
+      snprintf(buffer, length, "(%d)UNKNOWN ERROR!", ctx->status);
+      break;
+  }
+  return buffer;
+}
+#endif
 
 struct jesy_context* jesy_init_context(void *mem_pool, uint32_t pool_size)
 {
@@ -599,7 +636,7 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
   /* Fetch the first token before entering the state machine. */
   ctx->token = jesy_get_token(ctx);
   /* First node is expected to be an OPENING_BRACKET. */
-  if (!jesy_expect(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT)) {
+  if (!jesy_expect(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_OBJECT)) {
     return ctx->status;
   }
 
@@ -608,7 +645,7 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
     switch (ctx->iter->type) {
       /* <OPENING_BRACKET<OBJECT>>: CHOICE { <STRING<KEY>>, <CLOSING_BRACKET> }. */
       case JESY_OBJECT:
-        if (jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACKET, JESY_NONE) ||
+        if (jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE) ||
             jesy_accept(ctx, JESY_TOKEN_COMMA, JESY_NONE) ) {
           break;
         }
@@ -625,19 +662,19 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
             jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_TRUE)       ||
             jesy_accept(ctx, JESY_TOKEN_FALSE, JESY_FALSE)     ||
             jesy_accept(ctx, JESY_TOKEN_NULL, JESY_NULL)       ||
-            jesy_accept(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT)) {
+            jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_OBJECT)) {
           jesy_accept(ctx, JESY_TOKEN_COMMA, JESY_NONE);
           break;
         }
 
-        jesy_expect(ctx, JESY_TOKEN_OPENING_BRACE, JESY_ARRAY);
+        jesy_expect(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_ARRAY);
         break;
       /* ARRAY: COICE { VALUE, OPENING_BRACE, CLOSING_BRACE, OPENING_BRACKET } */
       case JESY_ARRAY:
         /* Array already has children elements. A comma is required to add new values */
         if (HAS_CHILD(ctx->iter)) {
           if (!jesy_accept(ctx, JESY_TOKEN_COMMA, JESY_NONE)) {
-            jesy_expect(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE);
+            jesy_expect(ctx, JESY_TOKEN_CLOSING_BRACKET, JESY_NONE);
             break;
           }
         }
@@ -647,9 +684,8 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
             jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_TRUE)      ||
             jesy_accept(ctx, JESY_TOKEN_FALSE, JESY_FALSE)    ||
             jesy_accept(ctx, JESY_TOKEN_NULL, JESY_NULL)      ||
-            jesy_accept(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT) ||
-            jesy_accept(ctx, JESY_TOKEN_OPENING_BRACE, JESY_ARRAY)) {
-          //jesy_accept(ctx, JESY_TOKEN_COMMA, JESY_NONE);
+            jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_OBJECT) ||
+            jesy_accept(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_ARRAY)) {
           break;
         }
 
@@ -659,14 +695,14 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
               jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_TRUE)      ||
               jesy_accept(ctx, JESY_TOKEN_FALSE, JESY_FALSE)    ||
               jesy_accept(ctx, JESY_TOKEN_NULL, JESY_NULL)      ||
-              jesy_accept(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT)) {
+              jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_OBJECT)) {
             break;
           }
-          jesy_expect(ctx, JESY_TOKEN_OPENING_BRACE, JESY_ARRAY);
+          jesy_expect(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_ARRAY);
           break;
         }
 
-        jesy_expect(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE);
+        jesy_expect(ctx, JESY_TOKEN_CLOSING_BRACKET, JESY_NONE);
         break;
       /* VALUE: CHOICE { COMMA, CLOSING_BRACE, CLOSING_BRACKET } */
       case JESY_STRING:
@@ -676,12 +712,12 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
       case JESY_NULL:
         if (HAS_PARENT(ctx->iter)) {
           if (ctx->pool[ctx->iter->parent].type == JESY_KEY) {
-            if (jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACKET, JESY_NONE)) {
+            if (jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE)) {
               break;
             }
           }
           else if (ctx->pool[ctx->iter->parent].type == JESY_ARRAY) {
-            if (jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE)) {
+            if (jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACKET, JESY_NONE)) {
               break;
             }
           }
@@ -701,8 +737,8 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
               jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_TRUE)      ||
               jesy_accept(ctx, JESY_TOKEN_FALSE, JESY_FALSE)    ||
               jesy_accept(ctx, JESY_TOKEN_NULL, JESY_NULL)      ||
-              jesy_accept(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_OBJECT) ||
-              jesy_expect(ctx, JESY_TOKEN_OPENING_BRACE, JESY_ARRAY)) {
+              jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_OBJECT) ||
+              jesy_expect(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_ARRAY)) {
             break;
           }
         }
@@ -728,7 +764,6 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
     }
   }
 
-  ctx->iter = ctx->root;
   return ctx->status;
 }
 enum jesy_state {
@@ -765,7 +800,6 @@ uint32_t jesy_evaluate(struct jesy_context *ctx)
         }
         else {
           ctx->status = JESY_UNEXPECTED_NODE;
-          JESY_LOG_MSG("\n jesy_evaluate err.1");
           return 0;
         }
         break;
@@ -777,7 +811,6 @@ uint32_t jesy_evaluate(struct jesy_context *ctx)
         }
         else {
           ctx->status = JESY_UNEXPECTED_NODE;
-          JESY_LOG_MSG("\n jesy_evaluate err.2");
           return 0;
         }
         break;
@@ -804,7 +837,6 @@ uint32_t jesy_evaluate(struct jesy_context *ctx)
         }
         else {
           ctx->status = JESY_UNEXPECTED_NODE;
-          JESY_LOG_MSG("\n jesy_evaluate err.3");
           return 0;
         }
         break;
@@ -829,7 +861,6 @@ uint32_t jesy_evaluate(struct jesy_context *ctx)
         }
         else {
           ctx->status = JESY_UNEXPECTED_NODE;
-          JESY_LOG_MSG("\n jesy_evaluate err.4");
           return 0;
         }
         break;
@@ -862,7 +893,6 @@ uint32_t jesy_evaluate(struct jesy_context *ctx)
       }
       else {
         ctx->status = JESY_UNEXPECTED_NODE;
-        JESY_LOG_MSG("\n jesy_evaluate err.5");
         return 0;
       }
     }
@@ -877,7 +907,6 @@ uint32_t jesy_evaluate(struct jesy_context *ctx)
       if (ctx->iter->type == JESY_KEY) {
         if (state != JESY_STATE_GOT_VALUE) {
           ctx->status = JESY_UNEXPECTED_NODE;
-          JESY_LOG_MSG("\n jesy_evaluate err.6");
           return 0;
         }
         state = JESY_STATE_GOT_KEY;
@@ -885,7 +914,6 @@ uint32_t jesy_evaluate(struct jesy_context *ctx)
       else if (ctx->iter->type == JESY_OBJECT) {
         if (state != JESY_STATE_GOT_KEY) {
           ctx->status = JESY_UNEXPECTED_NODE;
-          JESY_LOG_MSG("\n jesy_evaluate err.7");
           return 0;
         }
         json_len++; /* '}' */
@@ -904,7 +932,6 @@ uint32_t jesy_evaluate(struct jesy_context *ctx)
         }
         else {
           ctx->status = JESY_UNEXPECTED_NODE;
-          JESY_LOG_MSG("\n jesy_evaluate err.8");
           return 0;
         }
         ctx->iter = GET_SIBLING(ctx, ctx->iter);

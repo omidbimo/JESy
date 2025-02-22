@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #ifndef NDEBUG
-  #include "jesy_util.h"
+  #include "jesy_logging.h"
   #define JESY_LOG_TOKEN jesy_log_token
   #define JESY_LOG_NODE  jesy_log_node
   #define JESY_LOG_MSG   jesy_log_msg

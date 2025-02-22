@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include "jesy.h"
-#include "jesy_util.h"
+#include "jesy_logging.h"
 
 #define POOL_SIZE 4096
 static uint8_t mem_pool[POOL_SIZE];

@@ -21,7 +21,7 @@ int main(void)
                   "],"
                   "\"view\": ["
                       "{\"id\": \"ZoomIn\", \"label\": \"Zoom In\"},"
-                      "{\"id\": \"ZoomOut\", \"label\": \"Zoom Out\"}"
+                      "{\"id\": \"ZoomOut\", \"label\": \"Zoom Out\"},"
                       "{\"id\": \"OriginalView\", \"label\": \"Original View\"}"
                   "],"
                   "\"playback\": ["
@@ -121,7 +121,7 @@ int main(void)
 
   /* Getting last element of playback array and then getting the key value element.
      jesy_get_array_value delivers the object containing the id:playback speed*/
-  if (0 == jesy_update_key_value(jdoc, jesy_get_array_value(jdoc, items, -1), "id", JESY_STRING, "PlaybackSpeed")) {
+  if (0 == jesy_update_key_value(jdoc, jesy_get_array_value(jdoc, items, -1), "id", JESY_VALUE_STRING, "PlaybackSpeed")) {
     value = jesy_get_key_value(jdoc, jesy_get_array_value(jdoc, items, -1), "id");
     if (value) printf("\n    After change:\n        menu.playback.id[-1]: \"%.*s\"", value->length, value->value);
   }
@@ -132,7 +132,7 @@ int main(void)
   if (object) {
     key = jesy_add_key(jdoc, object, "id");
     if (key) {
-      jesy_update_key_value(jdoc, object, "id", JESY_STRING, "Save");
+      jesy_update_key_value(jdoc, object, "id", JESY_VALUE_STRING, "Save");
     }
   }
 
@@ -147,7 +147,7 @@ int main(void)
   if (object) {
     key = jesy_add_key(jdoc, object, "id");
     if (key) {
-      jesy_update_key_value(jdoc, object, "id", JESY_STRING, "Close");
+      jesy_update_key_value(jdoc, object, "id", JESY_VALUE_STRING, "Close");
     }
   }
   value = jesy_get_key_value(jdoc, jesy_get_array_value(jdoc, items, -1), "id");

@@ -247,7 +247,7 @@ const struct {
   enum jesy_token_type token_type;
 } jesy_symbolic_token_mapping[] = {
   {'\0', JESY_TOKEN_EOF             },
-  {'{',  JESY_TOKEN_CLOSING_BRACE   },
+  {'{',  JESY_TOKEN_OPENING_BRACE   },
   {'}',  JESY_TOKEN_CLOSING_BRACE   },
   {'[',  JESY_TOKEN_OPENING_BRACKET },
   {']',  JESY_TOKEN_CLOSING_BRACKET },
@@ -484,13 +484,13 @@ static bool jesy_accept(struct jesy_context *ctx,
              (element_type == JESY_ARRAY)) {
       new_node = jesy_append_element(ctx, ctx->iter, element_type, ctx->token.length, &ctx->json_data[ctx->token.offset]);
     }
-    else if (element_type == JESY_STRING) {
+    else if (element_type == JESY_VALUE_STRING) {
       new_node = jesy_append_element(ctx, ctx->iter, element_type, ctx->token.length, &ctx->json_data[ctx->token.offset]);
     }
-    else if ((element_type == JESY_NUMBER)  ||
-             (element_type == JESY_TRUE)    ||
-             (element_type == JESY_FALSE)   ||
-             (element_type == JESY_NULL)) {
+    else if ((element_type == JESY_VALUE_NUMBER)  ||
+             (element_type == JESY_VALUE_TRUE)    ||
+             (element_type == JESY_VALUE_FALSE)   ||
+             (element_type == JESY_VALUE_NULL)) {
       new_node = jesy_append_element(ctx, ctx->iter, element_type, ctx->token.length, &ctx->json_data[ctx->token.offset]);
     }
     else { /* JESY_NONE */
@@ -503,16 +503,16 @@ static bool jesy_accept(struct jesy_context *ctx,
              otherwise, go back to the parent object.
       */
       if (token_type == JESY_TOKEN_CLOSING_BRACKET) {
-        /* [] (empty array) is a special case that needs no iteration in the
-           direction the parent node. */
+        /* [] (empty array) is a special case that needs no iteration back to
+           the parent node. */
         if (ctx->iter->type != JESY_ARRAY) {
           ctx->iter = jesy_get_parent_bytype(ctx, ctx->iter, JESY_ARRAY);
         }
         ctx->iter = jesy_get_structure_parent_node(ctx, ctx->iter);
       }
       else if (token_type == JESY_TOKEN_CLOSING_BRACE) {
-        /* {} (empty object)is a special case that needs no iteration in the
-           direction the parent node. */
+        /* {} (empty object)is a special case that needs no iteration back to
+           the parent node. */
         if (ctx->iter->type != JESY_OBJECT) {
           ctx->iter = jesy_get_parent_bytype(ctx, ctx->iter, JESY_OBJECT);
         }
@@ -636,7 +636,7 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
   /* Fetch the first token before entering the state machine. */
   ctx->token = jesy_get_token(ctx);
   /* First node is expected to be an OPENING_BRACKET. */
-  if (!jesy_expect(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_OBJECT)) {
+  if (!jesy_expect(ctx, JESY_TOKEN_OPENING_BRACE, JESY_OBJECT)) {
     return ctx->status;
   }
 
@@ -657,17 +657,16 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
         break;
       /* <KEY>+<COLON>: CHOICE { <VALUE>, <ARRAY>, <OBJECT> } */
       case JESY_KEY:
-        if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_STRING)   ||
-            jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_NUMBER)   ||
-            jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_TRUE)       ||
-            jesy_accept(ctx, JESY_TOKEN_FALSE, JESY_FALSE)     ||
-            jesy_accept(ctx, JESY_TOKEN_NULL, JESY_NULL)       ||
-            jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_OBJECT)) {
+        if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_VALUE_STRING)   ||
+            jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_VALUE_NUMBER)   ||
+            jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_VALUE_TRUE)       ||
+            jesy_accept(ctx, JESY_TOKEN_FALSE, JESY_VALUE_FALSE)     ||
+            jesy_accept(ctx, JESY_TOKEN_NULL, JESY_VALUE_NULL)       ||
+            jesy_accept(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_ARRAY)) {
           jesy_accept(ctx, JESY_TOKEN_COMMA, JESY_NONE);
           break;
         }
-
-        jesy_expect(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_ARRAY);
+        jesy_expect(ctx, JESY_TOKEN_OPENING_BRACE, JESY_OBJECT);
         break;
       /* ARRAY: COICE { VALUE, OPENING_BRACE, CLOSING_BRACE, OPENING_BRACKET } */
       case JESY_ARRAY:
@@ -679,23 +678,23 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
           }
         }
 
-        if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_STRING)  ||
-            jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_NUMBER)  ||
-            jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_TRUE)      ||
-            jesy_accept(ctx, JESY_TOKEN_FALSE, JESY_FALSE)    ||
-            jesy_accept(ctx, JESY_TOKEN_NULL, JESY_NULL)      ||
-            jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_OBJECT) ||
-            jesy_accept(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_ARRAY)) {
+        if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_VALUE_STRING)  ||
+            jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_VALUE_NUMBER)  ||
+            jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_VALUE_TRUE)      ||
+            jesy_accept(ctx, JESY_TOKEN_FALSE, JESY_VALUE_FALSE)    ||
+            jesy_accept(ctx, JESY_TOKEN_NULL, JESY_VALUE_NULL)      ||
+            jesy_accept(ctx, JESY_TOKEN_OPENING_BRACE, JESY_OBJECT) ||
+            jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACKET, JESY_NONE)) {
           break;
         }
 
         if (jesy_accept(ctx, JESY_TOKEN_COMMA, JESY_NONE)) {
-          if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_STRING)  ||
-              jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_NUMBER)  ||
-              jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_TRUE)      ||
-              jesy_accept(ctx, JESY_TOKEN_FALSE, JESY_FALSE)    ||
-              jesy_accept(ctx, JESY_TOKEN_NULL, JESY_NULL)      ||
-              jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_OBJECT)) {
+          if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_VALUE_STRING)  ||
+              jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_VALUE_NUMBER)  ||
+              jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_VALUE_TRUE)      ||
+              jesy_accept(ctx, JESY_TOKEN_FALSE, JESY_VALUE_FALSE)    ||
+              jesy_accept(ctx, JESY_TOKEN_NULL, JESY_VALUE_NULL)      ||
+              jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE)) {
             break;
           }
           jesy_expect(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_ARRAY);
@@ -705,11 +704,11 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
         jesy_expect(ctx, JESY_TOKEN_CLOSING_BRACKET, JESY_NONE);
         break;
       /* VALUE: CHOICE { COMMA, CLOSING_BRACE, CLOSING_BRACKET } */
-      case JESY_STRING:
-      case JESY_NUMBER:
-      case JESY_TRUE:
-      case JESY_FALSE:
-      case JESY_NULL:
+      case JESY_VALUE_STRING:
+      case JESY_VALUE_NUMBER:
+      case JESY_VALUE_TRUE:
+      case JESY_VALUE_FALSE:
+      case JESY_VALUE_NULL:
         if (HAS_PARENT(ctx->iter)) {
           if (ctx->pool[ctx->iter->parent].type == JESY_KEY) {
             if (jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_NONE)) {
@@ -732,11 +731,11 @@ uint32_t jesy_parse(struct jesy_context *ctx, const char *json_data, uint32_t js
         if (ctx->iter->type == JESY_KEY) {
         }
         else if (ctx->iter->type == JESY_ARRAY) {
-          if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_STRING)  ||
-              jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_NUMBER)  ||
-              jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_TRUE)      ||
-              jesy_accept(ctx, JESY_TOKEN_FALSE, JESY_FALSE)    ||
-              jesy_accept(ctx, JESY_TOKEN_NULL, JESY_NULL)      ||
+          if (jesy_accept(ctx, JESY_TOKEN_STRING, JESY_VALUE_STRING)  ||
+              jesy_accept(ctx, JESY_TOKEN_NUMBER, JESY_VALUE_NUMBER)  ||
+              jesy_accept(ctx, JESY_TOKEN_TRUE, JESY_VALUE_TRUE)      ||
+              jesy_accept(ctx, JESY_TOKEN_FALSE, JESY_VALUE_FALSE)    ||
+              jesy_accept(ctx, JESY_TOKEN_NULL, JESY_VALUE_NULL)      ||
               jesy_accept(ctx, JESY_TOKEN_CLOSING_BRACE, JESY_OBJECT) ||
               jesy_expect(ctx, JESY_TOKEN_OPENING_BRACKET, JESY_ARRAY)) {
             break;
@@ -816,14 +815,14 @@ uint32_t jesy_evaluate(struct jesy_context *ctx)
         break;
 
       case JESY_STATE_WANT_VALUE:
-        if (ctx->iter->type == JESY_STRING) {
+        if (ctx->iter->type == JESY_VALUE_STRING) {
             json_len += (ctx->iter->length + sizeof(char) * 2);/* +2 for "" */
             state = JESY_STATE_GOT_VALUE;
         }
-        else if ((ctx->iter->type == JESY_NUMBER)  ||
-                 (ctx->iter->type == JESY_TRUE)    ||
-                 (ctx->iter->type == JESY_FALSE)   ||
-                 (ctx->iter->type == JESY_NULL)) {
+        else if ((ctx->iter->type == JESY_VALUE_NUMBER)  ||
+                 (ctx->iter->type == JESY_VALUE_TRUE)    ||
+                 (ctx->iter->type == JESY_VALUE_FALSE)   ||
+                 (ctx->iter->type == JESY_VALUE_NULL)) {
           json_len += ctx->iter->length;
           state = JESY_STATE_GOT_VALUE;
         }
@@ -842,13 +841,13 @@ uint32_t jesy_evaluate(struct jesy_context *ctx)
         break;
 
       case JESY_STATE_WANT_ARRAY_VALUE:
-        if (ctx->iter->type == JESY_STRING) {
+        if (ctx->iter->type == JESY_VALUE_STRING) {
             json_len += (uint32_t)ctx->iter->length + (sizeof("\"\"") - 1);
         }
-        else if ((ctx->iter->type == JESY_NUMBER)  ||
-                 (ctx->iter->type == JESY_TRUE)    ||
-                 (ctx->iter->type == JESY_FALSE)   ||
-                 (ctx->iter->type == JESY_NULL)) {
+        else if ((ctx->iter->type == JESY_VALUE_NUMBER)  ||
+                 (ctx->iter->type == JESY_VALUE_TRUE)    ||
+                 (ctx->iter->type == JESY_VALUE_FALSE)   ||
+                 (ctx->iter->type == JESY_VALUE_NULL)) {
           json_len += ctx->iter->length;
         }
         else if (ctx->iter->type == JESY_ARRAY) {
@@ -971,15 +970,15 @@ uint32_t jesy_render(struct jesy_context *ctx, char *buffer, uint32_t length)
       *dst++ = '"';
       *dst++ = ':';
     }
-    else if (iter->type == JESY_STRING) {
+    else if (iter->type == JESY_VALUE_STRING) {
       *dst++ = '"';
       dst = (char*)memcpy(dst, iter->value, iter->length) + iter->length;
       *dst++ = '"';
     }
-    else if ((iter->type == JESY_NUMBER)  ||
-             (iter->type == JESY_TRUE)    ||
-             (iter->type == JESY_FALSE)   ||
-             (iter->type == JESY_NULL)) {
+    else if ((iter->type == JESY_VALUE_NUMBER)  ||
+             (iter->type == JESY_VALUE_TRUE)    ||
+             (iter->type == JESY_VALUE_FALSE)   ||
+             (iter->type == JESY_VALUE_NULL)) {
       dst = (char*)memcpy(dst, iter->value, iter->length) + iter->length;
     }
     else if (iter->type == JESY_ARRAY) {
@@ -1229,17 +1228,17 @@ uint32_t jesy_update_key_value_array(struct jesy_context *ctx, struct jesy_eleme
 
 uint32_t jesy_update_key_value_true(struct jesy_context *ctx, struct jesy_element *object, const char *keys)
 {
-  return jesy_update_key_value(ctx, object, keys, JESY_TRUE, "");
+  return jesy_update_key_value(ctx, object, keys, JESY_VALUE_TRUE, "");
 }
 
 uint32_t jesy_update_key_value_false(struct jesy_context *ctx, struct jesy_element *object, const char *keys)
 {
-  return jesy_update_key_value(ctx, object, keys, JESY_FALSE, "");
+  return jesy_update_key_value(ctx, object, keys, JESY_VALUE_FALSE, "");
 }
 
 uint32_t jesy_update_key_value_null(struct jesy_context *ctx, struct jesy_element *object, const char *keys)
 {
-  return jesy_update_key_value(ctx, object, keys, JESY_NULL, "");
+  return jesy_update_key_value(ctx, object, keys, JESY_VALUE_NULL, "");
 }
 
 struct jesy_element* jesy_update_array_value(struct jesy_context *ctx, struct jesy_element *array, int16_t index, enum jesy_type type, const char *value)

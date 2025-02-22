@@ -2,7 +2,7 @@
 
 JSON for Embedded Systems is a lightweight [JSON ]([JSON](https://www.json.org/json-en.html))library implemented for Embedded targets with some restrictions such as no dynamic memory allocations or limited stack size to support recursion. The goal is to make JESy fully conform to the [JSON](complies with [RFC 8259](https://datatracker.ietf.org/doc/html/rfc8259) JSON standard,) standard.
 
-JESy provides an API to parse JSON documents into a tree of JSON elements, manipulate the elements and then render the elements into a string.
+JESy provides an API to parse JSON documents into a tree of JSON elements, modify the elements and then render the elements into a string.
 
 ## Key features
 
